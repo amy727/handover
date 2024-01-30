@@ -1,3 +1,7 @@
+# Handover
+
+Human-Robot handovers based on Handover-Sim.
+
 # Handover-Sim
 
 Handover-Sim is a Python-based simulation environment and benchmark for human-to-robot object handovers. The environment and benchmark were initially described in an ICRA 2022 paper:
