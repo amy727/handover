@@ -20,7 +20,7 @@ class Detector:
 
     def __init__(self, scaled_width=1920, scaled_height=1080):
         # TODO: lots of hard coded values here, need to make them configurable
-        self.device = torch.device("cuda")
+        self.device = 0 if torch.cuda.is_available() else -1
         self.model = Owlv2ForObjectDetection.from_pretrained(
             "google/owlv2-base-patch16-ensemble"
         )
@@ -34,7 +34,7 @@ class Detector:
         self.SCALED_WIDTH = scaled_width
         self.SCALED_HEIGHT = scaled_height
 
-    def detect(self, image, texts: List, threshold=0.25):
+    def detect(self, image, texts: List, threshold=0.4):
         """Calls the detector and post-processes the outputs.
 
         Args:
@@ -55,20 +55,22 @@ class Detector:
             outputs=outputs, target_sizes=target_sizes, threshold=threshold
         )
         
-        all_results = []
+        all_boxes = []
+        all_scores = []
+        all_labels = []
+        
+        # Result in this case is per caption that was passed
         for result in results:
             boxes, scores, labels = (
                 result["boxes"],
                 result["scores"],
                 result["labels"],
             )
-            all_results.append((
-                boxes.cpu().detach().numpy(),
-                scores.cpu().detach().numpy(),
-                labels.cpu().detach().numpy(),
-            ))
-        
-        return all_results
+            all_boxes.append(boxes.cpu().detach().numpy())
+            all_scores.append(scores.cpu().detach().numpy())
+            all_labels.append(labels.cpu().detach().numpy())
+                
+        return all_boxes, all_scores, all_labels
 
     def _detect(self, image, texts: List):
         """Runs the detector.
