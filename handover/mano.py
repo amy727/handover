@@ -72,7 +72,7 @@ class MANO:
             body.initial_base_position = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
             body.initial_dof_position = self._pose[self._frame]
             body.initial_dof_velocity = [0.0] * 51
-            body.link_color = [(0.0, 1.0, 0.0, 1.0)] * 53
+            body.link_color = [(0.96, 0.80, 0.69, 1.0)] * 53
             body.link_collision_filter = [self._cfg.ENV.COLLISION_FILTER_MANO] * 53
             body.link_lateral_friction = [5.0] * 53
             body.link_spinning_friction = [5.0] * 53
