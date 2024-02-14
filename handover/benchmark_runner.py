@@ -150,9 +150,49 @@ class BenchmarkRunner:
 
         return result
 
+    def _save_pointcloud_as_ply(self, filename, pointcloud, colors=None):
+        """
+        Save a pointcloud to a PLY file.
+
+        Args:
+            filename (str): The output filename.
+            pointcloud (np.ndarray): Numpy array containing point coordinates of shape (N, 3).
+            colors (np.ndarray, optional): Numpy array containing RGB colors of shape (N, 3).
+        """
+        with open(filename, 'w') as f:
+            f.write("ply\n")
+            f.write("format ascii 1.0\n")
+            f.write(f"element vertex {len(pointcloud)}\n")
+            f.write("property float x\n")
+            f.write("property float y\n")
+            f.write("property float z\n")
+            if colors is not None:
+                f.write("property uchar red\n")
+                f.write("property uchar green\n")
+                f.write("property uchar blue\n")
+            f.write("end_header\n")
+            for i in range(len(pointcloud)):
+                line = f"{pointcloud[i, 0]} {pointcloud[i, 1]} {pointcloud[i, 2]}"
+                if colors is not None:
+                    line += f" {colors[i, 0]} {colors[i, 1]} {colors[i, 2]}"
+                f.write(line + "\n")
+
     def _render_offscreen_and_save(self, render_dir):
-        render_file = os.path.join(render_dir, "{:06d}.jpg".format(self._env.frame))
-        cv2.imwrite(render_file, self._env.render_offscreen()[:, :, [2, 1, 0, 3]])
+        data = self._env.render_offscreen()
+        
+        img_render_file = os.path.join(render_dir, "{:06d}_img.jpg".format(self._env.frame))
+        cv2.imwrite(img_render_file, data["color"][:, :, [2, 1, 0, 3]])
+
+        depth_render_file = os.path.join(render_dir, "{:06d}_depth.png".format(self._env.frame))
+        normalized_depth = cv2.normalize(data["depth"], None, 0, 255, cv2.NORM_MINMAX)
+        depth_image = np.uint8(normalized_depth)
+        cv2.imwrite(depth_render_file, depth_image)
+
+        # seg_render_file = os.path.join(render_dir, "{:06d}_seg.jpg".format(self._env.frame))
+        # cv2.imwrite(seg_render_file, data["segmentation"])
+
+        pc_render_file = os.path.join(render_dir, "{:06d}_pc.ply".format(self._env.frame))
+        self._save_pointcloud_as_ply(pc_render_file, data["pc"])
 
     @timer
     def _run_policy(self, policy, obs):

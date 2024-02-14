@@ -11,8 +11,9 @@ from handover.panda import Panda, PandaHandCamera
 from handover.dex_ycb import DexYCB
 from handover.ycb import YCB
 from handover.mano import MANO
-from handover.transform3d import get_t3d_from_qt
+from handover.transform3d import *
 
+from scipy.spatial.transform import Rotation as R
 
 class HandoverEnv(easysim.SimulatorEnv):
     def init(self):
@@ -314,12 +315,79 @@ class HandoverEnv(easysim.SimulatorEnv):
                     "vertex_{:02d}_{:d}".format(link_index, i)
                 ].env_ids_reset_base_state = [0]
 
+    def _calculate_orientation(self):
+        # Calculate forward, right, and recalculated up vectors
+        forward = (self._camera.target - self._camera.position)
+        forward /= np.linalg.norm(forward)  # Normalize
+        right = np.cross(self._camera.up_vector, forward)
+        right /= np.linalg.norm(right)  # Normalize
+        up = np.cross(forward, right)
+        up /= np.linalg.norm(up)  # Normalize
+        
+        # Construct rotation matrix
+        rotation_matrix = np.stack([right, up, -forward], axis=1)
+        
+        # Convert rotation matrix to quaternion
+        rotation = R.from_matrix(rotation_matrix)
+        orientation_quat = rotation.as_quat()  # Returns [x, y, z, w]
+        
+        return orientation_quat
+
+    def depth_to_pointcloud(self, depth):
+        h, w = depth.shape
+        vertical_fov = np.radians(self._camera.vertical_fov)
+        focal_length = h / (2 * np.tan(vertical_fov / 2))
+
+        u, v = np.meshgrid(np.arange(w), np.arange(h), indexing='xy')
+        z = depth.flatten()
+        x = (u.flatten() - w / 2) * z / focal_length
+        y = (v.flatten() - h / 2) * z / focal_length
+
+        points = np.stack([x, -y, -z], axis=1)
+        return points
+
+    def compute_bounding_boxes(self, pointcloud, segmentation, target_ids):
+        bounding_boxes = {}
+        for obj_id in target_ids:
+            mask = segmentation.flatten() == obj_id
+            if mask.sum() == 0:
+                continue
+            obj_points = pointcloud[mask]
+            if obj_points.size == 0:
+                continue
+            min_bound = np.min(obj_points, axis=0)
+            max_bound = np.max(obj_points, axis=0)
+            bounding_boxes[obj_id] = (min_bound, max_bound)
+        return bounding_boxes
+
     def render_offscreen(self):
         if not self.cfg.ENV.RENDER_OFFSCREEN:
             raise ValueError(
                 "`render_offscreen()` can only be called when RENDER_OFFSCREEN is set to True"
             )
-        return self._camera.color[0].numpy()
+        data = {}
+        data["color"] = self._camera.color[0].numpy()
+        data["depth"] = self._camera.depth[0].numpy()
+        data["segmentation"] = self._camera.segmentation[0].numpy()
+
+        # Generate point cloud from depth
+        depth_in_meters = data["depth"] * (self._camera.far - self._camera.near) + self._camera.near
+        pointcloud = self.depth_to_pointcloud(depth_in_meters)
+
+        # TODO: Transform to world frame
+        # print(self._calculate_orientation(), self._camera.position)
+        # camera_transform = get_t3d_from_qt(self._calculate_orientation(), self._camera.position)
+        # point_cloud_homogeneous = np.hstack((pointcloud, np.ones((pointcloud.shape[0], 1))))
+        # transformed_point_cloud = camera_transform.transform_points(point_cloud_homogeneous)
+        # transformed_point_cloud = transformed_point_cloud[:, :3]
+        
+        data["pc"] = pointcloud
+        
+        print("IMG", data["color"].shape)
+        print("DEPTH", data["depth"].shape)
+        print("SEGMENTATION", data["segmentation"].shape)
+        return data
+        # return self._camera.color[0].numpy()
 
     def callback_get_reward_post_status(self, reward, status):
         """ """
