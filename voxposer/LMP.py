@@ -7,9 +7,9 @@ from openai import RateLimitError, APIConnectionError
 from pygments import highlight
 from pygments.lexers import PythonLexer
 from pygments.formatters import TerminalFormatter
-from utils import load_prompt, DynamicObservation, IterableDynamicObservation
+from voxposer.utils import load_prompt, DynamicObservation, IterableDynamicObservation
 import time
-from LLM_cache import DiskCache
+from voxposer.LLM_cache import DiskCache
 
 class LMP:
     """Language Model Program (LMP), adopted from Code as Policies."""

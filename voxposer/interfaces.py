@@ -1,11 +1,11 @@
-from LMP import LMP
-from utils import get_clock_time, normalize_vector, pointat2quat, bcolors, Observation, VoxelIndexingWrapper
+from voxposer.LMP import LMP
+from voxposer.utils import get_clock_time, normalize_vector, pointat2quat, bcolors, Observation, VoxelIndexingWrapper
 import numpy as np
-from planners import PathPlanner
+from voxposer.planners import PathPlanner
 import time
 from scipy.ndimage import distance_transform_edt
 import transforms3d
-from controllers import Controller
+from voxposer.controllers import Controller
 
 # creating some aliases for end effector and table in case LLMs refer to them differently (but rarely this happens)
 EE_ALIAS = ['ee', 'endeffector', 'end_effector', 'end effector', 'gripper', 'hand']

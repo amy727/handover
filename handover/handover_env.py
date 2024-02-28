@@ -35,6 +35,15 @@ class HandoverEnv(easysim.SimulatorEnv):
         if self.cfg.ENV.RENDER_OFFSCREEN:
             self._render_offscreen_init()
 
+        # Hardcode workspace bounds for now
+        self.workspace_bounds_min = np.array([-20,-20,-20])
+        self.workspace_bounds_max = np.array([20,20,20])
+
+    def get_object_names(self):
+        obj_names = list(self.scene._name_to_body.keys())
+        print(f"obj names: {obj_names}")
+        return obj_names
+
     @abc.abstractmethod
     def _get_panda_cls(self):
         """ """
@@ -449,13 +458,13 @@ class HandoverEnv(easysim.SimulatorEnv):
         colors = np.concatenate(colors, axis=0)
         masks = np.concatenate(masks, axis=0)
 
-        # # only keep points within workspace
-        # chosen_idx_x = (points[:, 0] > self.workspace_bounds_min[0]) & (points[:, 0] < self.workspace_bounds_max[0])
-        # chosen_idx_y = (points[:, 1] > self.workspace_bounds_min[1]) & (points[:, 1] < self.workspace_bounds_max[1])
-        # chosen_idx_z = (points[:, 2] > self.workspace_bounds_min[2]) & (points[:, 2] < self.workspace_bounds_max[2])
-        # points = points[(chosen_idx_x & chosen_idx_y & chosen_idx_z)]
-        # colors = colors[(chosen_idx_x & chosen_idx_y & chosen_idx_z)]
-        # masks = masks[(chosen_idx_x & chosen_idx_y & chosen_idx_z)]
+        # only keep points within workspace
+        chosen_idx_x = (points[:, 0] > self.workspace_bounds_min[0]) & (points[:, 0] < self.workspace_bounds_max[0])
+        chosen_idx_y = (points[:, 1] > self.workspace_bounds_min[1]) & (points[:, 1] < self.workspace_bounds_max[1])
+        chosen_idx_z = (points[:, 2] > self.workspace_bounds_min[2]) & (points[:, 2] < self.workspace_bounds_max[2])
+        points = points[(chosen_idx_x & chosen_idx_y & chosen_idx_z)]
+        colors = colors[(chosen_idx_x & chosen_idx_y & chosen_idx_z)]
+        masks = masks[(chosen_idx_x & chosen_idx_y & chosen_idx_z)]
 
         # if ignore_robot:
         #     robot_mask = np.isin(masks, self.robot_mask_ids)

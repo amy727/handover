@@ -13,6 +13,14 @@ from datetime import datetime
 
 from handover.benchmark_wrapper import EpisodeStatus, HandoverBenchmarkWrapper
 
+import openai
+from voxposer.arguments import get_config
+from voxposer.interfaces import setup_LMP
+from voxposer.visualizers import ValueMapVisualizer
+from voxposer.utils import set_lmp_objects
+
+openai.api_key = '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'  # set your API key here
+
 
 def timer(func):
     @functools.wraps(func)
@@ -31,6 +39,18 @@ class BenchmarkRunner:
         self._cfg = cfg
 
         self._env = HandoverBenchmarkWrapper(gym.make(self._cfg.ENV.ID, cfg=self._cfg))
+
+        self.config = get_config('handover')
+        self.lmps, self.lmp_env = setup_LMP(self._env, self.config, debug=False)
+        self.voxposer_ui = self.lmps['plan_ui']
+
+        # Hardcode workspace bounds for now
+        self.workspace_bounds_min = np.array([-20,-20,-20])
+        self.workspace_bounds_max = np.array([20,20,20])
+        self.visualizer = ValueMapVisualizer(self.config['visualizer'])
+        if self.visualizer is not None:
+            self.visualizer.update_bounds(self.workspace_bounds_min, self.workspace_bounds_max)
+        self.voxposer_ui = self.lmps['plan_ui']
 
     def run(self, policy, res_dir=None, index=None):
         if self._cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER:
@@ -119,11 +139,17 @@ class BenchmarkRunner:
         result["action"] = []
         result["elapsed_time"] = []
 
+        set_lmp_objects(self.lmps, self._env.get_object_names())  # set the object names to be used by voxposer
+
         if self._cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER:
             self._render_offscreen_and_save(render_dir)
 
         while True:
             (action, info), elapsed_time = self._run_policy(policy, obs)
+
+            # instruction = np.random.choice(descriptions)
+            instruction = "Avoid the table."
+            self.voxposer_ui(instruction)
 
             if "obs_time" in info:
                 elapsed_time -= info["obs_time"]

@@ -3,7 +3,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 from scipy.ndimage import distance_transform_edt
 from scipy.signal import savgol_filter
-from utils import get_clock_time, normalize_map, calc_curvature
+from voxposer.utils import get_clock_time, normalize_map, calc_curvature
 
 
 class PathPlanner:
