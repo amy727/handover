@@ -190,9 +190,12 @@ class BenchmarkRunner:
 
         # seg_render_file = os.path.join(render_dir, "{:06d}_seg.jpg".format(self._env.frame))
         # cv2.imwrite(seg_render_file, data["segmentation"])
-
+        
         pc_render_file = os.path.join(render_dir, "{:06d}_pc.ply".format(self._env.frame))
-        self._save_pointcloud_as_ply(pc_render_file, data["pc"])
+        self._save_pointcloud_as_ply(pc_render_file, data["pc"][0], data["pc"][1])
+
+        pc_render_file2 = os.path.join(render_dir, "{:06d}_pc_obj.ply".format(self._env.frame))
+        self._save_pointcloud_as_ply(pc_render_file2, data["pc_obj"][0])
 
     @timer
     def _run_policy(self, policy, obs):
