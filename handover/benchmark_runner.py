@@ -19,8 +19,6 @@ from voxposer.interfaces import setup_LMP
 from voxposer.visualizers import ValueMapVisualizer
 from voxposer.utils import set_lmp_objects
 
-openai.api_key = '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'  # set your API key here
-
 
 def timer(func):
     @functools.wraps(func)
@@ -50,6 +48,7 @@ class BenchmarkRunner:
         self.visualizer = ValueMapVisualizer(self.config['visualizer'])
         if self.visualizer is not None:
             self.visualizer.update_bounds(self.workspace_bounds_min, self.workspace_bounds_max)
+        self._env.visualizer = self.visualizer
         self.voxposer_ui = self.lmps['plan_ui']
 
     def run(self, policy, res_dir=None, index=None):

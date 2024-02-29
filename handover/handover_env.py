@@ -344,6 +344,17 @@ class HandoverEnv(easysim.SimulatorEnv):
         
         return orientation_quat
 
+    def get_ee_pose(self):
+        ee_pose = self.panda._body.link_state[0, self.panda.LINK_IND_HAND, :].numpy()
+        print(f"ee link pose: {ee_pose}")
+        return ee_pose
+
+    def get_ee_pos(self):
+        return self.get_ee_pose()[:3]
+
+    def get_ee_quat(self):
+        return self.get_ee_pose()[3:7]
+
     def depth_to_pointcloud(self, depth):
         h, w = depth.shape
         vertical_fov = np.radians(self._camera.vertical_fov)

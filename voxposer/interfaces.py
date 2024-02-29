@@ -142,67 +142,67 @@ class LMP_interface():
           step_info['targets_world'] = self._voxel_to_world(planner_info['targets_voxel'])
           self._env.visualizer.visualize(step_info)
 
-        # execute path
-        print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] start executing path via controller ({len(traj_world)} waypoints){bcolors.ENDC}')
-        controller_infos = dict()
-        for i, waypoint in enumerate(traj_world):
-          # check if the movement is finished
-          if np.linalg.norm(movable_obs['_position_world'] - traj_world[-1][0]) <= 0.01:
-            print(f"{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] reached last waypoint; curr_xyz={movable_obs['_position_world']}, target={traj_world[-1][0]} (distance: {np.linalg.norm(movable_obs['_position_world'] - traj_world[-1][0]):.3f})){bcolors.ENDC}")
-            break
-          # skip waypoint if moving to this point is going in opposite direction of the final target point
-          # (for example, if you have over-pushed an object, no need to move back)
-          if i != 0 and i != len(traj_world) - 1:
-            movable2target = traj_world[-1][0] - movable_obs['_position_world']
-            movable2waypoint = waypoint[0] - movable_obs['_position_world']
-            if np.dot(movable2target, movable2waypoint).round(3) <= 0:
-              print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] skip waypoint {i+1} because it is moving in opposite direction of the final target{bcolors.ENDC}')
-              continue
-          # execute waypoint
-          controller_info = self._controller.execute(movable_obs, waypoint)
-          # loggging
-          movable_obs = movable_obs_func()
-          dist2target = np.linalg.norm(movable_obs['_position_world'] - traj_world[-1][0])
-          if not object_centric and controller_info['mp_info'] == -1:
-            print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] failed waypoint {i+1} (wp: {waypoint[0].round(3)}, actual: {movable_obs["_position_world"].round(3)}, target: {traj_world[-1][0].round(3)}, start: {traj_world[0][0].round(3)}, dist2target: {dist2target.round(3)}); mp info: {controller_info["mp_info"]}{bcolors.ENDC}')
-          else:
-            print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] completed waypoint {i+1} (wp: {waypoint[0].round(3)}, actual: {movable_obs["_position_world"].round(3)}, target: {traj_world[-1][0].round(3)}, start: {traj_world[0][0].round(3)}, dist2target: {dist2target.round(3)}){bcolors.ENDC}')
-          controller_info['controller_step'] = i
-          controller_info['target_waypoint'] = waypoint
-          controller_infos[i] = controller_info
-        step_info['controller_infos'] = controller_infos
-        execute_info.append(step_info)
-        # check whether we need to replan
-        curr_pos = movable_obs['position']
-        if distance_transform_edt(1 - _affordance_map)[tuple(curr_pos)] <= 2:
-          print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] reached target; terminating {bcolors.ENDC}')
-          break
-    print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] finished executing path via controller{bcolors.ENDC}')
+    #     # execute path
+    #     print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] start executing path via controller ({len(traj_world)} waypoints){bcolors.ENDC}')
+    #     controller_infos = dict()
+    #     for i, waypoint in enumerate(traj_world):
+    #       # check if the movement is finished
+    #       if np.linalg.norm(movable_obs['_position_world'] - traj_world[-1][0]) <= 0.01:
+    #         print(f"{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] reached last waypoint; curr_xyz={movable_obs['_position_world']}, target={traj_world[-1][0]} (distance: {np.linalg.norm(movable_obs['_position_world'] - traj_world[-1][0]):.3f})){bcolors.ENDC}")
+    #         break
+    #       # skip waypoint if moving to this point is going in opposite direction of the final target point
+    #       # (for example, if you have over-pushed an object, no need to move back)
+    #       if i != 0 and i != len(traj_world) - 1:
+    #         movable2target = traj_world[-1][0] - movable_obs['_position_world']
+    #         movable2waypoint = waypoint[0] - movable_obs['_position_world']
+    #         if np.dot(movable2target, movable2waypoint).round(3) <= 0:
+    #           print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] skip waypoint {i+1} because it is moving in opposite direction of the final target{bcolors.ENDC}')
+    #           continue
+    #       # execute waypoint
+    #       controller_info = self._controller.execute(movable_obs, waypoint)
+    #       # loggging
+    #       movable_obs = movable_obs_func()
+    #       dist2target = np.linalg.norm(movable_obs['_position_world'] - traj_world[-1][0])
+    #       if not object_centric and controller_info['mp_info'] == -1:
+    #         print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] failed waypoint {i+1} (wp: {waypoint[0].round(3)}, actual: {movable_obs["_position_world"].round(3)}, target: {traj_world[-1][0].round(3)}, start: {traj_world[0][0].round(3)}, dist2target: {dist2target.round(3)}); mp info: {controller_info["mp_info"]}{bcolors.ENDC}')
+    #       else:
+    #         print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] completed waypoint {i+1} (wp: {waypoint[0].round(3)}, actual: {movable_obs["_position_world"].round(3)}, target: {traj_world[-1][0].round(3)}, start: {traj_world[0][0].round(3)}, dist2target: {dist2target.round(3)}){bcolors.ENDC}')
+    #       controller_info['controller_step'] = i
+    #       controller_info['target_waypoint'] = waypoint
+    #       controller_infos[i] = controller_info
+    #     step_info['controller_infos'] = controller_infos
+    #     execute_info.append(step_info)
+    #     # check whether we need to replan
+    #     curr_pos = movable_obs['position']
+    #     if distance_transform_edt(1 - _affordance_map)[tuple(curr_pos)] <= 2:
+    #       print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] reached target; terminating {bcolors.ENDC}')
+    #       break
+    # print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] finished executing path via controller{bcolors.ENDC}')
 
-    # make sure we are at the final target position and satisfy any additional parametrization
-    # (skip if we are specifying object-centric motion)
-    if not object_centric:
-      try:
-        # traj_world: world_xyz, rotation, velocity, gripper
-        ee_pos_world = traj_world[-1][0]
-        ee_rot_world = traj_world[-1][1]
-        ee_pose_world = np.concatenate([ee_pos_world, ee_rot_world])
-        ee_speed = traj_world[-1][2]
-        gripper_state = traj_world[-1][3]
-      except:
-        # evaluate latest voxel map
-        _rotation_map = rotation_map()
-        _velocity_map = velocity_map()
-        _gripper_map = gripper_map()
-        # get last ee pose
-        ee_pos_world = self._env.get_ee_pos()
-        ee_pos_voxel = self.get_ee_pos()
-        ee_rot_world = _rotation_map[ee_pos_voxel[0], ee_pos_voxel[1], ee_pos_voxel[2]]
-        ee_pose_world = np.concatenate([ee_pos_world, ee_rot_world])
-        ee_speed = _velocity_map[ee_pos_voxel[0], ee_pos_voxel[1], ee_pos_voxel[2]]
-        gripper_state = _gripper_map[ee_pos_voxel[0], ee_pos_voxel[1], ee_pos_voxel[2]]
-      # move to the final target
-      self._env.apply_action(np.concatenate([ee_pose_world, [gripper_state]]))
+    # # make sure we are at the final target position and satisfy any additional parametrization
+    # # (skip if we are specifying object-centric motion)
+    # if not object_centric:
+    #   try:
+    #     # traj_world: world_xyz, rotation, velocity, gripper
+    #     ee_pos_world = traj_world[-1][0]
+    #     ee_rot_world = traj_world[-1][1]
+    #     ee_pose_world = np.concatenate([ee_pos_world, ee_rot_world])
+    #     ee_speed = traj_world[-1][2]
+    #     gripper_state = traj_world[-1][3]
+    #   except:
+    #     # evaluate latest voxel map
+    #     _rotation_map = rotation_map()
+    #     _velocity_map = velocity_map()
+    #     _gripper_map = gripper_map()
+    #     # get last ee pose
+    #     ee_pos_world = self._env.get_ee_pos()
+    #     ee_pos_voxel = self.get_ee_pos()
+    #     ee_rot_world = _rotation_map[ee_pos_voxel[0], ee_pos_voxel[1], ee_pos_voxel[2]]
+    #     ee_pose_world = np.concatenate([ee_pos_world, ee_rot_world])
+    #     ee_speed = _velocity_map[ee_pos_voxel[0], ee_pos_voxel[1], ee_pos_voxel[2]]
+    #     gripper_state = _gripper_map[ee_pos_voxel[0], ee_pos_voxel[1], ee_pos_voxel[2]]
+    #   # move to the final target
+    #   self._env.apply_action(np.concatenate([ee_pose_world, [gripper_state]]))
 
     return execute_info
   
@@ -329,7 +329,8 @@ class LMP_interface():
       elif type == 'velocity':
         voxel_map = np.ones((self._map_size, self._map_size, self._map_size))
       elif type == 'gripper':
-        voxel_map = np.ones((self._map_size, self._map_size, self._map_size)) * self._env.get_last_gripper_action()
+        # voxel_map = np.ones((self._map_size, self._map_size, self._map_size)) * self._env.get_last_gripper_action()
+        voxel_map = np.ones((self._map_size, self._map_size, self._map_size)) 
       elif type == 'rotation':
         voxel_map = np.zeros((self._map_size, self._map_size, self._map_size, 4))
         voxel_map[:, :, :] = self._env.get_ee_quat()
