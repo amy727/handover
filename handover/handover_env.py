@@ -344,6 +344,10 @@ class HandoverEnv(easysim.SimulatorEnv):
         
         return orientation_quat
 
+    def reset_to_default_pose(self):
+        #TODO
+        return self.get_ee_pose()
+
     def get_ee_pose(self):
         ee_pose = self.panda._body.link_state[0, self.panda.LINK_IND_HAND, :].numpy()
         print(f"ee link pose: {ee_pose}")
@@ -520,7 +524,7 @@ class HandoverEnv(easysim.SimulatorEnv):
         print(f'color type: {type(data["pc"][1])}, color shape: {data["pc"][1].shape}')
         print(f'unique segmenation values: {np.unique(data["segmentation"])}')
 
-        data["pc_obj"] = self.get_3d_obs_by_name("20200820-subject-03_right")
+        data["pc_obj"] = self.get_3d_obs_by_name("table")
         
         print("IMG", data["color"].shape)
         print("DEPTH", data["depth"].shape)

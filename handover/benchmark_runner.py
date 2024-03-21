@@ -8,6 +8,7 @@ import functools
 import time
 import cv2
 import numpy as np
+import torch
 
 from datetime import datetime
 
@@ -33,10 +34,14 @@ def timer(func):
 
 
 class BenchmarkRunner:
-    def __init__(self, cfg):
+    def __init__(self, cfg, sim_client=None, robot=None, gripper=None):
         self._cfg = cfg
 
         self._env = HandoverBenchmarkWrapper(gym.make(self._cfg.ENV.ID, cfg=self._cfg))
+
+        self.sim_client = sim_client
+        self.robot = robot
+        self.gripper = gripper
 
         self.config = get_config('handover')
         self.lmps, self.lmp_env = setup_LMP(self._env, self.config, debug=False)
@@ -45,6 +50,8 @@ class BenchmarkRunner:
         # Hardcode workspace bounds for now
         self.workspace_bounds_min = np.array([-20,-20,-20])
         self.workspace_bounds_max = np.array([20,20,20])
+
+        # Setup visualizer and add it to the simulation env
         self.visualizer = ValueMapVisualizer(self.config['visualizer'])
         if self.visualizer is not None:
             self.visualizer.update_bounds(self.workspace_bounds_min, self.workspace_bounds_max)
@@ -75,10 +82,16 @@ class BenchmarkRunner:
 
             dt = datetime.now()
             dt = dt.strftime("%Y-%m-%d_%H-%M-%S")
+            # res_dir = os.path.join(
+            #     self._cfg.BENCHMARK.RESULT_DIR,
+            #     "{}_{}_{}_{}".format(
+            #         dt, policy.name, self._cfg.BENCHMARK.SETUP, self._cfg.BENCHMARK.SPLIT
+            #     ),
+            # )
             res_dir = os.path.join(
                 self._cfg.BENCHMARK.RESULT_DIR,
                 "{}_{}_{}_{}".format(
-                    dt, policy.name, self._cfg.BENCHMARK.SETUP, self._cfg.BENCHMARK.SPLIT
+                    dt, "thesis", self._cfg.BENCHMARK.SETUP, self._cfg.BENCHMARK.SPLIT
                 ),
             )
             os.makedirs(res_dir, exist_ok=True)
@@ -100,7 +113,8 @@ class BenchmarkRunner:
             )
 
             kwargs = {}
-            if self._cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER:
+            # if self._cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER:
+            if True:
                 kwargs["render_dir"] = os.path.join(res_dir, "{:03d}".format(idx))
                 os.makedirs(kwargs["render_dir"], exist_ok=True)
 
@@ -140,15 +154,39 @@ class BenchmarkRunner:
 
         set_lmp_objects(self.lmps, self._env.get_object_names())  # set the object names to be used by voxposer
 
-        if self._cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER:
+        # if self._cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER:
+        if True:
             self._render_offscreen_and_save(render_dir)
+
+        # VOXPOSER INSTRUCTION
+        instruction = "Avoid the table and reach for the hand."
+        self.voxposer_ui(instruction)
+        traj_world = self._env.execute_info[0]['traj_world']
+        print("========== TRAJECTORY ===========")
+        print(traj_world)
+
+        # for i, waypoints in enumerate(traj_world):
+        #     # Command robot to ee xyz position
+        #     ee_pos_desired = torch.from_numpy(waypoints[0])
+        #     ee_ori_desired = torch.from_numpy(waypoints[1])
+
+        #     print(f"\nMoving ee pos to: {ee_pos_desired} ...\n")
+        #     state_log = self.robot.move_to_ee_pose(
+        #         position=ee_pos_desired, 
+        #         orientation=ee_ori_desired, 
+        #         time_to_go=2.0
+        #     )
+
+        #     # result["action"].append(action)
+        #     # result["elapsed_time"].append(elapsed_time)
+
+        #     # obs, _, _, info = self._env.step(action)
+        #     self._env.frame += 1
+
+        #     self._render_offscreen_and_save(render_dir)
 
         while True:
             (action, info), elapsed_time = self._run_policy(policy, obs)
-
-            # instruction = np.random.choice(descriptions)
-            instruction = "Avoid the table."
-            self.voxposer_ui(instruction)
 
             if "obs_time" in info:
                 elapsed_time -= info["obs_time"]
@@ -171,7 +209,7 @@ class BenchmarkRunner:
         result["action"] = np.array(result["action"])
         result["elapsed_time"] = np.array(result["elapsed_time"])
         result["elapsed_frame"] = self._env.frame
-        result["result"] = info["status"]
+        result["result"] = info["status"]       
 
         return result
 
@@ -203,9 +241,12 @@ class BenchmarkRunner:
                 f.write(line + "\n")
 
     def _render_offscreen_and_save(self, render_dir):
+        render_dir = "/home/chenam14/ws/handover-sim/results/thesis"
+        # print("RENDER_DIR", render_dir)
         data = self._env.render_offscreen()
         
         img_render_file = os.path.join(render_dir, "{:06d}_img.jpg".format(self._env.frame))
+        # print("img_render_file:", img_render_file)
         cv2.imwrite(img_render_file, data["color"][:, :, [2, 1, 0, 3]])
 
         depth_render_file = os.path.join(render_dir, "{:06d}_depth.png".format(self._env.frame))

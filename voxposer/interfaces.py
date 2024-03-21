@@ -101,7 +101,7 @@ class LMP_interface():
     execute_info = []
     if affordance_map is not None:
       # execute path in closed-loop
-      for plan_iter in range(self._cfg['max_plan_iter']):
+      for plan_iter in range(1):
         step_info = dict()
         # evaluate voxel maps such that we use latest information
         movable_obs = movable_obs_func()
@@ -141,7 +141,10 @@ class LMP_interface():
           step_info['start_pos_world'] = self._voxel_to_world(start_pos)
           step_info['targets_world'] = self._voxel_to_world(planner_info['targets_voxel'])
           self._env.visualizer.visualize(step_info)
-
+        
+        execute_info.append(step_info)
+        # print("Step info:", step_info)
+    self._env.execute_info = execute_info
     #     # execute path
     #     print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] start executing path via controller ({len(traj_world)} waypoints){bcolors.ENDC}')
     #     controller_infos = dict()
@@ -281,7 +284,7 @@ class LMP_interface():
     return self._get_default_voxel_map('gripper')()  # return evaluated voxel map instead of functions (such that LLM can manipulate it)
   
   def reset_to_default_pose(self):
-     self._env.reset_to_default_pose()
+    self._env.reset_to_default_pose()
   
   # ======================================================
   # == helper functions
