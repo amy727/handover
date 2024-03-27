@@ -117,6 +117,8 @@ class YCB:
                     + self._cfg.ENV.YCB_ROTATION_VELOCITY_GAIN
                 )
                 self._scene.add_body(body)
+                if i == self.ids[0]:
+                    self._scene.ycb_obj = body
                 self.bodies[i] = body
         else:
             self.bodies[self.ids[0]].update_attr_array(

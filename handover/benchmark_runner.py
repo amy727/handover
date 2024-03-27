@@ -38,6 +38,7 @@ class BenchmarkRunner:
         self._cfg = cfg
 
         self._env = HandoverBenchmarkWrapper(gym.make(self._cfg.ENV.ID, cfg=self._cfg))
+        # print("YCB OBJECT:",self._env.ycb)
 
         self.sim_client = sim_client
         self.robot = robot
@@ -48,8 +49,10 @@ class BenchmarkRunner:
         self.voxposer_ui = self.lmps['plan_ui']
 
         # Hardcode workspace bounds for now
-        self.workspace_bounds_min = np.array([-20,-20,-20])
-        self.workspace_bounds_max = np.array([20,20,20])
+        self.workspace_bounds_min = np.array([-5,-5,-5])
+        self.workspace_bounds_max = np.array([10,10,10])
+        # self._env.workspace_bounds_min = self.workspace_bounds_min
+        # self._env.workspace_bounds_max =self.workspace_bounds_max
 
         # Setup visualizer and add it to the simulation env
         self.visualizer = ValueMapVisualizer(self.config['visualizer'])
@@ -143,8 +146,11 @@ class BenchmarkRunner:
                 np.savez_compressed(res_file, **result)
 
     def _set_waypoints(self, policy):
+        # Set the visualizer
+        self._env.visualizer.update_scene_points(*self._env.get_scene_3d_obs())
+
         # VOXPOSER INSTRUCTION
-        instruction = "Avoid the table and reach for the hand."
+        instruction = f"Pick up the {self._env.ycb_name} and avoid the hand and table with no collisions."
         self.voxposer_ui(instruction)
         traj_world = self._env.execute_info[0]['traj_world']
 
@@ -162,45 +168,16 @@ class BenchmarkRunner:
         result["action"] = []
         result["elapsed_time"] = []
 
+        self._env.set_up_objects()
         set_lmp_objects(self.lmps, self._env.get_object_names())  # set the object names to be used by voxposer
 
         if self._cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER:
             self._render_offscreen_and_save(render_dir)
 
-        # # VOXPOSER INSTRUCTION
-        # instruction = "Avoid the table and reach for the hand."
-        # self.voxposer_ui(instruction)
-        # traj_world = self._env.execute_info[0]['traj_world']
-
-        # waypoints = [np.concatenate([waypoint[0], waypoint[1]]) for waypoint in traj_world]
-        # policy.set_waypoints(waypoints)
-        # print("========== WAYPOINTS ===========")
-        # print(policy._waypoints)
-
-        # for i, waypoints in enumerate(traj_world):
-        #     # Command robot to ee xyz position
-        #     ee_pos_desired = torch.from_numpy(waypoints[0])
-        #     ee_ori_desired = torch.from_numpy(waypoints[1])
-
-        #     print(f"\nMoving ee pos to: {ee_pos_desired} ...\n")
-        #     state_log = self.robot.move_to_ee_pose(
-        #         position=ee_pos_desired, 
-        #         orientation=ee_ori_desired, 
-        #         time_to_go=2.0
-        #     )
-
-        #     # result["action"].append(action)
-        #     # result["elapsed_time"].append(elapsed_time)
-
-        #     # obs, _, _, info = self._env.step(action)
-        #     self._env.frame += 1
-
-        #     self._render_offscreen_and_save(render_dir)
-
         while True:
             if obs["frame"] == policy._steps_wait:
                 self._set_waypoints(policy)
-                
+
             (action, info), elapsed_time = self._run_policy(policy, obs)
 
             if "obs_time" in info:

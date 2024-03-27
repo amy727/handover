@@ -501,9 +501,6 @@ class BulletManipulator:
         self.sim.stepSimulation()
         self.t += self.dt
 
-    
-# @hydra.main(config_path="config", config_name="franka_sim")
-# def main(cfg):
 def main():
     # Handover config
     handover_cfg = get_config_from_args()
@@ -513,68 +510,10 @@ def main():
     # handover_cfg.BENCHMARK.SAVE_RESULT = True
     # handover_cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER = True
 
-    # Create sim
-    # sim_wrapper = BulletManipulator(
-    #     cfg.hz, 
-    #     cfg.robot_model, 
-    #     gui=False, 
-    #     base_pos=handover_cfg.ENV.PANDA_BASE_POSITION, 
-    #     base_orn=handover_cfg.ENV.PANDA_BASE_ORIENTATION
-    # )
-
-    # # Connect to Polymetis sim interface
-    # sim_client = polysim.SimInterface(cfg.hz)
-    # sim_client.register_arm_control(
-    #     server_address=f"localhost:50050",
-    #     state_callback=sim_wrapper.get_arm_state,
-    #     action_callback=sim_wrapper.apply_arm_control,
-    #     dof=7,
-    #     kp_joint=cfg.robot_client.metadata_cfg.default_Kq,
-    #     kd_joint=cfg.robot_client.metadata_cfg.default_Kqd,
-    #     kp_ee=cfg.robot_client.metadata_cfg.default_Kx,
-    #     kd_ee=cfg.robot_client.metadata_cfg.default_Kxd,
-    #     urdf_path="franka_panda/panda_arm.urdf",
-    #     rest_pose=sim_wrapper.rest_pose,
-    #     ee_link_name="panda_link8",
-    # )
-    # sim_client.register_gripper_control(
-    #     server_address=f"localhost:50052",
-    #     state_callback=sim_wrapper.get_gripper_state,
-    #     action_callback=sim_wrapper.apply_gripper_control,
-    #     max_width=0.08,
-    # )
-    # sim_client.register_step_callback(sim_wrapper.step)
-
-    # sim_client_thread = threading.Thread(target=sim_client.run)
-    # sim_client_thread.start()
-
-    # print("===== HANDOVER CONFIG ======")
-    # print(handover_cfg)    
     policy = ThesisPolicy(handover_cfg)
-
-    # robot = RobotInterface(
-    #     ip_address="localhost",
-    #     port=50050
-    # )
-
-    # # Reset
-    # # robot.go_home()
-
-    # gripper = GripperInterface(
-    #     ip_address="localhost",
-    # )
-
-    # ee_pos, ee_quat = robot.get_ee_pose()
-    # print(f"Current ee position: {ee_pos}")
-    # print(f"Current ee orientation: {ee_quat}  (xyzw)")
-
 
     benchmark_runner = BenchmarkRunner(handover_cfg)
     benchmark_runner.run(policy)
-
-    # # Start sim client
-    # # sim_client.run()
-    # sim_client_thread.join(timeout=5)
     
 
 if __name__ == "__main__":

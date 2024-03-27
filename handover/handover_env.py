@@ -25,6 +25,7 @@ class HandoverEnv(easysim.SimulatorEnv):
 
         self._dex_ycb = DexYCB(self.cfg)
         self._ycb = YCB(self.cfg, self.scene, self.dex_ycb)
+        # print("YCB SELF:", self._ycb.name)
         self._mano = MANO(self.cfg, self.scene, self.dex_ycb)
 
         self._release_step_thresh = self.cfg.ENV.RELEASE_TIME_THRESH / self.cfg.SIM.TIME_STEP
@@ -36,8 +37,20 @@ class HandoverEnv(easysim.SimulatorEnv):
             self._render_offscreen_init()
 
         # Hardcode workspace bounds for now
-        self.workspace_bounds_min = np.array([-20,-20,-20])
-        self.workspace_bounds_max = np.array([20,20,20])
+        # self.workspace_bounds_min = np.array([-20,-20,-20])
+        # self.workspace_bounds_max = np.array([20,20,20])
+        self.workspace_bounds_min = np.array([-5,-5,-5])
+        self.workspace_bounds_max = np.array([10,10,10])
+
+    def set_up_objects(self):
+        self.name2ids = {}
+        self.ycb_name = "ycb"
+        for name, obj in self.scene._name_to_body.items():
+            self.name2ids[name] = self.scene._bodies.index(obj) + 1
+            print(name, obj, self.scene.ycb_obj)
+            if obj == self.scene.ycb_obj:
+                self.ycb_name = name
+        print(f"name2ids {self.name2ids}")
 
     def get_object_names(self):
         obj_names = list(self.scene._name_to_body.keys())
@@ -359,9 +372,50 @@ class HandoverEnv(easysim.SimulatorEnv):
     def get_ee_quat(self):
         return self.get_ee_pose()[3:7]
 
-    def depth_to_pointcloud(self, depth):
+    def calculate_extrinsics(self, camera):
+        # Calculate forward vector
+        forward = np.array(camera.target) - np.array(camera.position)
+        forward = forward / np.linalg.norm(forward)
+
+        # Calculate right vector
+        right = np.cross(forward, np.array(camera.up_vector))
+        right = right / np.linalg.norm(right)
+
+        # Calculate up vector
+        up = np.cross(right, forward)
+
+        # Create rotation matrix
+        R = np.stack([right, up, -forward], axis=1)
+
+        # Translation vector
+        T = np.array(camera.position)
+
+        # Homogeneous matrix
+        H = np.zeros((4, 4))
+        H[:3, :3] = R
+        H[:3, 3] = T
+        H[3, 3] = 1
+
+        return H
+
+    def pc_to_world(self, points, H):
+        # Calculate the inverse of the homogeneous transformation matrix
+        # H_inv = np.linalg.inv(H)
+        
+        # Convert points to homogeneous coordinates
+        ones = np.ones((points.shape[0], 1))
+        points_homogeneous = np.hstack([points, ones])
+        
+        # Apply the transformation
+        points_world_homogeneous = np.dot(H, points_homogeneous.T).T
+        
+        # Convert back from homogeneous coordinates
+        points_world = points_world_homogeneous[:, :3] / points_world_homogeneous[:, 3, np.newaxis]
+        return points_world
+
+    def depth_to_pointcloud(self, depth, camera):
         h, w = depth.shape
-        vertical_fov = np.radians(self._camera.vertical_fov)
+        vertical_fov = np.radians(camera.vertical_fov)
         focal_length = h / (2 * np.tan(vertical_fov / 2))
 
         u, v = np.meshgrid(np.arange(w), np.arange(h), indexing='xy')
@@ -371,20 +425,6 @@ class HandoverEnv(easysim.SimulatorEnv):
 
         points = np.stack([x, -y, -z], axis=1)
         return points
-
-    def compute_bounding_boxes(self, pointcloud, segmentation, target_ids):
-        bounding_boxes = {}
-        for obj_id in target_ids:
-            mask = segmentation.flatten() == obj_id
-            if mask.sum() == 0:
-                continue
-            obj_points = pointcloud[mask]
-            if obj_points.size == 0:
-                continue
-            min_bound = np.min(obj_points, axis=0)
-            max_bound = np.max(obj_points, axis=0)
-            bounding_boxes[obj_id] = (min_bound, max_bound)
-        return bounding_boxes
 
     def get_3d_obs_by_name(self, query_name):
         """
@@ -396,9 +436,9 @@ class HandoverEnv(easysim.SimulatorEnv):
         Returns:
             tuple: A tuple containing object points and object normals.
         """
-        self.name2ids = {}
-        for name, obj in self.scene._name_to_body.items():
-            self.name2ids[name] = self.scene._bodies.index(obj) + 1
+        # self.name2ids = {}
+        # for name, obj in self.scene._name_to_body.items():
+        #     self.name2ids[name] = self.scene._bodies.index(obj) + 1
         assert query_name in self.name2ids, f"Unknown object name: {query_name}"
         obj_ids = self.name2ids[query_name]
         
@@ -410,7 +450,9 @@ class HandoverEnv(easysim.SimulatorEnv):
 
             # Generate point cloud from depth
             depth_in_meters = depth * (cam.far - cam.near) + cam.near
-            pc = self.depth_to_pointcloud(depth_in_meters)
+            pc = self.depth_to_pointcloud(depth_in_meters, cam)
+            H = self.calculate_extrinsics(cam)
+            pc = self.pc_to_world(pc, H)
 
             # Get observations
             points.append(pc)
@@ -463,7 +505,9 @@ class HandoverEnv(easysim.SimulatorEnv):
 
             # Generate point cloud from depth
             depth_in_meters = depth * (cam.far - cam.near) + cam.near
-            pc = self.depth_to_pointcloud(depth_in_meters)
+            pc = self.depth_to_pointcloud(depth_in_meters, cam)
+            H = self.calculate_extrinsics(cam)
+            pc = self.pc_to_world(pc, H)
 
             # Get observations
             points.append(pc)
@@ -497,7 +541,7 @@ class HandoverEnv(easysim.SimulatorEnv):
         pcd.points = o3d.utility.Vector3dVector(points)
         pcd.colors = o3d.utility.Vector3dVector(colors)
         pcd_downsampled = pcd.voxel_down_sample(voxel_size=0.001)
-        points = np.asarray(pcd_downsampled.points)
+        points = np.asarray(pcd_downsampled.points).astype(np.float16)
         colors = np.asarray(pcd_downsampled.colors).astype(np.uint8)
 
         return points, colors
