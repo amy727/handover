@@ -518,13 +518,13 @@ class HandoverEnv(easysim.SimulatorEnv):
 
         # TODO: Transform to world frame
         
-        data["pc"] = self.get_scene_3d_obs()
-        print("==== pc ====")
-        print(f'pc type: {type(data["pc"][0])}, pc shape: {data["pc"][0].shape}')
-        print(f'color type: {type(data["pc"][1])}, color shape: {data["pc"][1].shape}')
-        print(f'unique segmenation values: {np.unique(data["segmentation"])}')
+        # data["pc"] = self.get_scene_3d_obs()
+        # print("==== pc ====")
+        # print(f'pc type: {type(data["pc"][0])}, pc shape: {data["pc"][0].shape}')
+        # print(f'color type: {type(data["pc"][1])}, color shape: {data["pc"][1].shape}')
+        # print(f'unique segmenation values: {np.unique(data["segmentation"])}')
 
-        data["pc_obj"] = self.get_3d_obs_by_name("table")
+        # data["pc_obj"] = self.get_3d_obs_by_name("table")
         
         print("IMG", data["color"].shape)
         print("DEPTH", data["depth"].shape)

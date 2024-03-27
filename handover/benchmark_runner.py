@@ -113,8 +113,7 @@ class BenchmarkRunner:
             )
 
             kwargs = {}
-            # if self._cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER:
-            if True:
+            if self._cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER:
                 kwargs["render_dir"] = os.path.join(res_dir, "{:03d}".format(idx))
                 os.makedirs(kwargs["render_dir"], exist_ok=True)
 
@@ -143,6 +142,17 @@ class BenchmarkRunner:
                 res_file = os.path.join(res_dir, "{:03d}.npz".format(idx))
                 np.savez_compressed(res_file, **result)
 
+    def _set_waypoints(self, policy):
+        # VOXPOSER INSTRUCTION
+        instruction = "Avoid the table and reach for the hand."
+        self.voxposer_ui(instruction)
+        traj_world = self._env.execute_info[0]['traj_world']
+
+        waypoints = [np.concatenate([waypoint[0], waypoint[1]]) for waypoint in traj_world]
+        policy.set_waypoints(waypoints)
+        print("========== WAYPOINTS ===========")
+        print(policy._waypoints)
+
     @timer
     def _run_scene(self, idx, policy, render_dir=None):
         obs = self._env.reset(idx=idx)
@@ -154,16 +164,18 @@ class BenchmarkRunner:
 
         set_lmp_objects(self.lmps, self._env.get_object_names())  # set the object names to be used by voxposer
 
-        # if self._cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER:
-        if True:
+        if self._cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER:
             self._render_offscreen_and_save(render_dir)
 
-        # VOXPOSER INSTRUCTION
-        instruction = "Avoid the table and reach for the hand."
-        self.voxposer_ui(instruction)
-        traj_world = self._env.execute_info[0]['traj_world']
-        print("========== TRAJECTORY ===========")
-        print(traj_world)
+        # # VOXPOSER INSTRUCTION
+        # instruction = "Avoid the table and reach for the hand."
+        # self.voxposer_ui(instruction)
+        # traj_world = self._env.execute_info[0]['traj_world']
+
+        # waypoints = [np.concatenate([waypoint[0], waypoint[1]]) for waypoint in traj_world]
+        # policy.set_waypoints(waypoints)
+        # print("========== WAYPOINTS ===========")
+        # print(policy._waypoints)
 
         # for i, waypoints in enumerate(traj_world):
         #     # Command robot to ee xyz position
@@ -186,6 +198,9 @@ class BenchmarkRunner:
         #     self._render_offscreen_and_save(render_dir)
 
         while True:
+            if obs["frame"] == policy._steps_wait:
+                self._set_waypoints(policy)
+                
             (action, info), elapsed_time = self._run_policy(policy, obs)
 
             if "obs_time" in info:
@@ -241,7 +256,7 @@ class BenchmarkRunner:
                 f.write(line + "\n")
 
     def _render_offscreen_and_save(self, render_dir):
-        render_dir = "/home/chenam14/ws/handover-sim/results/thesis"
+        # render_dir = "/home/chenam14/ws/handover-sim/results/thesis3"
         # print("RENDER_DIR", render_dir)
         data = self._env.render_offscreen()
         
@@ -249,19 +264,19 @@ class BenchmarkRunner:
         # print("img_render_file:", img_render_file)
         cv2.imwrite(img_render_file, data["color"][:, :, [2, 1, 0, 3]])
 
-        depth_render_file = os.path.join(render_dir, "{:06d}_depth.png".format(self._env.frame))
-        normalized_depth = cv2.normalize(data["depth"], None, 0, 255, cv2.NORM_MINMAX)
-        depth_image = np.uint8(normalized_depth)
-        cv2.imwrite(depth_render_file, depth_image)
+        # depth_render_file = os.path.join(render_dir, "{:06d}_depth.png".format(self._env.frame))
+        # normalized_depth = cv2.normalize(data["depth"], None, 0, 255, cv2.NORM_MINMAX)
+        # depth_image = np.uint8(normalized_depth)
+        # cv2.imwrite(depth_render_file, depth_image)
 
         # seg_render_file = os.path.join(render_dir, "{:06d}_seg.jpg".format(self._env.frame))
         # cv2.imwrite(seg_render_file, data["segmentation"])
         
-        pc_render_file = os.path.join(render_dir, "{:06d}_pc.ply".format(self._env.frame))
-        self._save_pointcloud_as_ply(pc_render_file, data["pc"][0], data["pc"][1])
+        # pc_render_file = os.path.join(render_dir, "{:06d}_pc.ply".format(self._env.frame))
+        # self._save_pointcloud_as_ply(pc_render_file, data["pc"][0], data["pc"][1])
 
-        pc_render_file2 = os.path.join(render_dir, "{:06d}_pc_obj.ply".format(self._env.frame))
-        self._save_pointcloud_as_ply(pc_render_file2, data["pc_obj"][0])
+        # pc_render_file2 = os.path.join(render_dir, "{:06d}_pc_obj.ply".format(self._env.frame))
+        # self._save_pointcloud_as_ply(pc_render_file2, data["pc_obj"][0])
 
     @timer
     def _run_policy(self, policy, obs):

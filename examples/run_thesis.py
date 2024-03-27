@@ -226,8 +226,8 @@ def simple_extend(q1, q2, step_size=0.1):
         return q3
 
 
-class YangICRA2021Policy:
-    def __init__(self, cfg, bullet_manipulator, time_wait=time_wait, time_action_repeat=0.1, time_close_gripper=0.5):
+class ThesisPolicy:
+    def __init__(self, cfg, bullet_manipulator=None, time_wait=time_wait, time_action_repeat=0.1, time_close_gripper=0.5):
         self._cfg = cfg
         self._steps_wait = int(time_wait / self._cfg.SIM.TIME_STEP)
         self._steps_action_repeat = int(time_action_repeat / self._cfg.SIM.TIME_STEP)
@@ -250,14 +250,18 @@ class YangICRA2021Policy:
         )
         self._at_grasp_pose = AtPoseCondition(position_tol=0.005, rotation_tol=np.radians(15.0))
 
-        self._bullet_panda = bullet_manipulator
-        # self._bullet_panda = BulletPanda(
-        #     panda_urdf_file, self._cfg.ENV.PANDA_BASE_POSITION, self._cfg.ENV.PANDA_BASE_ORIENTATION
-        # )
+        # self._bullet_panda = bullet_manipulator
+        self._bullet_panda = BulletPanda(
+            panda_urdf_file, self._cfg.ENV.PANDA_BASE_POSITION, self._cfg.ENV.PANDA_BASE_ORIENTATION
+        )
+
+        self._waypoints = None
+        self._num_waypoints = 0
+        self._current_waypoint_index = 0
 
     @property
     def name(self):
-        return "yang-icra2021"
+        return "amy-thesis"
 
     def reset(self):
         self._done = False
@@ -267,7 +271,16 @@ class YangICRA2021Policy:
         self._current_grasps = None
         self._action_repeat = None
         self._back = None
+        self._waypoints = None
+        self._num_waypoints = 0
+        self._current_waypoint_index = 0
 
+    def set_waypoints(self, waypoints):
+        """Set the waypoints for the robot to follow."""
+        self._waypoints = waypoints
+        self._num_waypoints = len(waypoints)
+        self._current_waypoint_index = 0
+    
     def forward(self, obs):
         if self._current_grasps is None:
             self._current_grasps = self._load_grasps(obs)
@@ -280,8 +293,14 @@ class YangICRA2021Policy:
                     current_cfg = self._get_current_cfg(obs)
                     object_pose = self._get_object_pose(obs)
                     ee_pose = self._get_ee_pose(obs)
-                    action = self._get_reactive_policy_action(current_cfg, object_pose, ee_pose)
+                    waypoint = self._waypoints[self._current_waypoint_index]
+                    action = self._get_action(current_cfg, waypoint)
                     self._action_repeat = action.copy()
+                    self._current_waypoint_index += 1
+                    if self._current_waypoint_index == self._num_waypoints:
+                        self._done = True
+                    print("Current waypoint:", waypoint)
+                    print("Current action:", action)
                 else:
                     action = self._action_repeat.copy()
 
@@ -297,7 +316,8 @@ class YangICRA2021Policy:
                         current_cfg = self._get_current_cfg(obs)
                         self._back = self._get_back(current_cfg)
                     action = self._back.copy()
-
+        # print("======== FORWARD ==========")
+        # print(action)
         return action, {}
 
     def _load_grasps(self, obs):
@@ -322,64 +342,18 @@ class YangICRA2021Policy:
     def _get_ee_pose(self, obs):
         return obs["panda_body"].link_state[0, obs["panda_link_ind_hand"], 0:7].numpy()
 
-    def _get_reactive_policy_action(self, current_cfg, object_pose, ee_pose):
-        if self._q_standoff is None:
-            q0 = ee_pose
-        else:
-            q0 = self._q_standoff
-
-        opts = self._current_grasps
-        opts = compose_qq(object_pose, opts)
-        opts = compose_qq(opts, self._to_ee_frame)
-
-        opts_grasp = opts
-        opts_standoff = compose_qq(opts_grasp, self._standoff_offset)
-
-        costs_dict = {
-            "base_cost": self._base_wt * self._metric(q0, opts_standoff),
-            "home_cost": self._home_wt * self._metric(self._q_pref, opts_standoff),
-        }
-
-        costs = np.zeros(len(opts_standoff))
-        for _, val in costs_dict.items():
-            costs += val
+    def _get_action(self, current_cfg, waypoint):
 
         action = current_cfg.copy()
+        action[0:7] = self._compute_ik(waypoint, current_cfg)
         action[7:9] = 0.04
-
-        if not self._in_approach_region(ee_pose):
-            # Go to standoff pose.
-            for i, (_, opt_standoff, opt_grasp) in enumerate(
-                sorted(zip(costs, opts_standoff, opts_grasp), key=lambda x: x[0])
-            ):
-                if i >= self._max_opts:
-                    self._q_standoff = None
-                    break
-                ik_cfg = self._compute_ik(opt_standoff, current_cfg)
-                if ik_cfg is None:
-                    continue
-                self._q_standoff = opt_standoff
-                self._q_grasp = opt_grasp
-                self._in_approach_region.set_region(self._q_standoff, self._q_grasp)
-                self._at_grasp_pose.set_goal(self._q_grasp)
-                action[0:7] = ik_cfg
-                break
-        else:
-            if not self._at_grasp_pose(ee_pose):
-                # Go to grasp pose.
-                q_next = self._q_grasp.copy()
-                q_next[0:3] = simple_extend(ee_pose[0:3], self._q_grasp[0:3], step_size=0.05)
-                ik_cfg = self._compute_ik(q_next, current_cfg)
-                action[0:7] = ik_cfg
-            else:
-                # Move on to closing gipper and backing.
-                self._done = True
 
         return action
 
     def _compute_ik(self, pose, cfg):
         pos = pose[0:3]
         rot = pose[3:7]
+        print("Compute ik:", pos, rot)
         return self._bullet_panda.ik(cfg, pos, rot=rot)
 
     def _get_back(self, current_cfg):
@@ -528,77 +502,79 @@ class BulletManipulator:
         self.t += self.dt
 
     
-@hydra.main(config_path="config", config_name="franka_sim")
-def main(cfg):
+# @hydra.main(config_path="config", config_name="franka_sim")
+# def main(cfg):
+def main():
     # Handover config
     handover_cfg = get_config_from_args()
     handover_cfg.BENCHMARK.SETUP = "s0"
+    handover_cfg.SIM.RENDER = True
     handover_cfg.ENV.RENDER_OFFSCREEN = True
-    handover_cfg.BENCHMARK.SAVE_RESULT = True
-    handover_cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER = True
+    # handover_cfg.BENCHMARK.SAVE_RESULT = True
+    # handover_cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER = True
 
     # Create sim
-    sim_wrapper = BulletManipulator(
-        cfg.hz, 
-        cfg.robot_model, 
-        gui=False, 
-        base_pos=handover_cfg.ENV.PANDA_BASE_POSITION, 
-        base_orn=handover_cfg.ENV.PANDA_BASE_ORIENTATION
-    )
+    # sim_wrapper = BulletManipulator(
+    #     cfg.hz, 
+    #     cfg.robot_model, 
+    #     gui=False, 
+    #     base_pos=handover_cfg.ENV.PANDA_BASE_POSITION, 
+    #     base_orn=handover_cfg.ENV.PANDA_BASE_ORIENTATION
+    # )
 
-    # Connect to Polymetis sim interface
-    sim_client = polysim.SimInterface(cfg.hz)
-    sim_client.register_arm_control(
-        server_address=f"localhost:50050",
-        state_callback=sim_wrapper.get_arm_state,
-        action_callback=sim_wrapper.apply_arm_control,
-        dof=7,
-        kp_joint=cfg.robot_client.metadata_cfg.default_Kq,
-        kd_joint=cfg.robot_client.metadata_cfg.default_Kqd,
-        kp_ee=cfg.robot_client.metadata_cfg.default_Kx,
-        kd_ee=cfg.robot_client.metadata_cfg.default_Kxd,
-        urdf_path="franka_panda/panda_arm.urdf",
-        rest_pose=sim_wrapper.rest_pose,
-        ee_link_name="panda_link8",
-    )
-    sim_client.register_gripper_control(
-        server_address=f"localhost:50052",
-        state_callback=sim_wrapper.get_gripper_state,
-        action_callback=sim_wrapper.apply_gripper_control,
-        max_width=0.08,
-    )
-    sim_client.register_step_callback(sim_wrapper.step)
+    # # Connect to Polymetis sim interface
+    # sim_client = polysim.SimInterface(cfg.hz)
+    # sim_client.register_arm_control(
+    #     server_address=f"localhost:50050",
+    #     state_callback=sim_wrapper.get_arm_state,
+    #     action_callback=sim_wrapper.apply_arm_control,
+    #     dof=7,
+    #     kp_joint=cfg.robot_client.metadata_cfg.default_Kq,
+    #     kd_joint=cfg.robot_client.metadata_cfg.default_Kqd,
+    #     kp_ee=cfg.robot_client.metadata_cfg.default_Kx,
+    #     kd_ee=cfg.robot_client.metadata_cfg.default_Kxd,
+    #     urdf_path="franka_panda/panda_arm.urdf",
+    #     rest_pose=sim_wrapper.rest_pose,
+    #     ee_link_name="panda_link8",
+    # )
+    # sim_client.register_gripper_control(
+    #     server_address=f"localhost:50052",
+    #     state_callback=sim_wrapper.get_gripper_state,
+    #     action_callback=sim_wrapper.apply_gripper_control,
+    #     max_width=0.08,
+    # )
+    # sim_client.register_step_callback(sim_wrapper.step)
 
-    sim_client_thread = threading.Thread(target=sim_client.run)
-    sim_client_thread.start()
+    # sim_client_thread = threading.Thread(target=sim_client.run)
+    # sim_client_thread.start()
 
     # print("===== HANDOVER CONFIG ======")
     # print(handover_cfg)    
-    policy = YangICRA2021Policy(handover_cfg, sim_wrapper)
+    policy = ThesisPolicy(handover_cfg)
 
-    robot = RobotInterface(
-        ip_address="localhost",
-        port=50050
-    )
+    # robot = RobotInterface(
+    #     ip_address="localhost",
+    #     port=50050
+    # )
 
-    # Reset
-    # robot.go_home()
+    # # Reset
+    # # robot.go_home()
 
-    gripper = GripperInterface(
-        ip_address="localhost",
-    )
+    # gripper = GripperInterface(
+    #     ip_address="localhost",
+    # )
 
-    ee_pos, ee_quat = robot.get_ee_pose()
-    print(f"Current ee position: {ee_pos}")
-    print(f"Current ee orientation: {ee_quat}  (xyzw)")
+    # ee_pos, ee_quat = robot.get_ee_pose()
+    # print(f"Current ee position: {ee_pos}")
+    # print(f"Current ee orientation: {ee_quat}  (xyzw)")
 
 
-    benchmark_runner = BenchmarkRunner(handover_cfg, sim_client, robot, gripper)
+    benchmark_runner = BenchmarkRunner(handover_cfg)
     benchmark_runner.run(policy)
 
-    # Start sim client
-    # sim_client.run()
-    sim_client_thread.join(timeout=5)
+    # # Start sim client
+    # # sim_client.run()
+    # sim_client_thread.join(timeout=5)
     
 
 if __name__ == "__main__":
