@@ -51,6 +51,8 @@ class BenchmarkRunner:
         # Hardcode workspace bounds for now
         self.workspace_bounds_min = np.array([-5,-5,-5])
         self.workspace_bounds_max = np.array([10,10,10])
+        self.workspace_bounds_min = np.array([-2,-2,-2])
+        self.workspace_bounds_max = np.array([5,5,5])
         # self._env.workspace_bounds_min = self.workspace_bounds_min
         # self._env.workspace_bounds_max =self.workspace_bounds_max
 
@@ -168,6 +170,8 @@ class BenchmarkRunner:
         result["action"] = []
         result["elapsed_time"] = []
 
+        self._env.set_camera(self._env.env.env.simulator._view_matrix, 
+            self._env.env.env.simulator._projection_matrix)
         self._env.set_up_objects()
         set_lmp_objects(self.lmps, self._env.get_object_names())  # set the object names to be used by voxposer
 

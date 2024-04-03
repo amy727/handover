@@ -39,8 +39,10 @@ class HandoverEnv(easysim.SimulatorEnv):
         # Hardcode workspace bounds for now
         # self.workspace_bounds_min = np.array([-20,-20,-20])
         # self.workspace_bounds_max = np.array([20,20,20])
-        self.workspace_bounds_min = np.array([-5,-5,-5])
-        self.workspace_bounds_max = np.array([10,10,10])
+        self.workspace_bounds_min = np.array([-2,-2,-2])
+        self.workspace_bounds_max = np.array([5,5,5])
+
+        # print("HANDOVER:", self._simulator)
 
     def set_up_objects(self):
         self.name2ids = {}
@@ -94,6 +96,9 @@ class HandoverEnv(easysim.SimulatorEnv):
         camera.up_vector = (0.0, 0.0, 1.0)
         self.scene.add_camera(camera)
         self._camera = camera
+
+        # print("HANDOVER2:", self._simulator)
+        # print("SCENE CAMERAS:", self._simulator._cameras)
 
     def pre_reset(self, env_ids, scene_id):
         self.ycb.reset(scene_id)
@@ -339,24 +344,6 @@ class HandoverEnv(easysim.SimulatorEnv):
                     "vertex_{:02d}_{:d}".format(link_index, i)
                 ].env_ids_reset_base_state = [0]
 
-    def _calculate_orientation(self):
-        # Calculate forward, right, and recalculated up vectors
-        forward = (self._camera.target - self._camera.position)
-        forward /= np.linalg.norm(forward)  # Normalize
-        right = np.cross(self._camera.up_vector, forward)
-        right /= np.linalg.norm(right)  # Normalize
-        up = np.cross(forward, right)
-        up /= np.linalg.norm(up)  # Normalize
-        
-        # Construct rotation matrix
-        rotation_matrix = np.stack([right, up, -forward], axis=1)
-        
-        # Convert rotation matrix to quaternion
-        rotation = R.from_matrix(rotation_matrix)
-        orientation_quat = rotation.as_quat()  # Returns [x, y, z, w]
-        
-        return orientation_quat
-
     def reset_to_default_pose(self):
         #TODO
         return self.get_ee_pose()
@@ -388,7 +375,7 @@ class HandoverEnv(easysim.SimulatorEnv):
         R = np.stack([right, up, -forward], axis=1)
 
         # Translation vector
-        T = np.array(camera.position)
+        T = -R @ np.array(camera.position)
 
         # Homogeneous matrix
         H = np.zeros((4, 4))
@@ -396,11 +383,23 @@ class HandoverEnv(easysim.SimulatorEnv):
         H[:3, 3] = T
         H[3, 3] = 1
 
+        print("EXTRINSICS:", H)
+
         return H
+
+    def set_camera(self, view_matrix, projection_matrix):
+        self.view_matrix = np.array(view_matrix['offscreen_renderer']).reshape([4, 4], order="F")
+        # self.view_matrix = np.array([[1., 0., 0., 0.5],
+        #                     [0., 0., -1., -0.4],
+        #                     [0., 1., 0., 1.2],
+        #                     [0., 0., 0., 1.]])
+        self.proj_matrix = np.array(projection_matrix['offscreen_renderer']).reshape([4, 4], order="F")
+        print("VIEW MATRIX", self.view_matrix)
+        print("PROJ MATRIX", self.proj_matrix)
 
     def pc_to_world(self, points, H):
         # Calculate the inverse of the homogeneous transformation matrix
-        # H_inv = np.linalg.inv(H)
+        H_inv = np.linalg.inv(H)
         
         # Convert points to homogeneous coordinates
         ones = np.ones((points.shape[0], 1))
@@ -426,6 +425,95 @@ class HandoverEnv(easysim.SimulatorEnv):
         points = np.stack([x, -y, -z], axis=1)
         return points
 
+    def get_point_cloud(self, camera, depth_frame, color_frame=None, seg_frame=None):
+        tran_pix_world = np.linalg.inv(np.matmul(self.proj_matrix, self.view_matrix))
+
+        if depth_frame is not None:
+            depth_frame = np.array(depth_frame, copy=True)
+            height, width = depth_frame.shape
+            print("Depth shape:", width, height)
+
+            # create a grid with pixel coordinates and depth values
+            y, x = np.mgrid[-1 : 1 : 2 / height, -1 : 1 : 2 / width]
+            y *= -1.0
+            x, y, z = x.reshape(-1), y.reshape(-1), depth_frame.reshape(-1)
+            h = np.ones_like(z)
+
+            pixels = np.stack([x, y, z, h], axis=1)
+            # filter out "infinite" depths
+            # pixels = pixels[z < 0.99]
+            pixels[:, 2] = 2 * pixels[:, 2] - 1
+
+            # turn pixels to world coordinates
+            points = np.matmul(tran_pix_world, pixels.T).T
+            points /= points[:, 3:4]
+            points = points[:, :3]
+
+            # # Visualize the point cloud points
+            # pcl = o3d.geometry.PointCloud()
+            # pcl.points = o3d.utility.Vector3dVector(points)
+
+            # Add colors to the point cloud
+            colors = None
+            if color_frame is not None:
+                colors = color_frame[:, :, :3].reshape(-1, 3)
+                print(f"Color shape: {colors.shape}")
+
+            seg = None
+            if seg_frame is not None:
+                seg = seg_frame.reshape(-1)
+                print(f"Mask shape: {seg.shape}")
+
+            print(f"Points shape: {points.shape}")
+            return points, colors, seg
+
+    # def get_point_cloud(self, camera, depth_frame, color_frame=None, seg_frame=None):
+    #     tran_pix_world = np.linalg.inv(np.matmul(self.proj_matrix, self.view_matrix))
+
+    #     if depth_frame is not None:
+    #         print("======= DEPTH ========")
+    #         far = camera.far
+    #         near = camera.near
+
+    #         # Compute the original depth values
+    #         depth_frame2 = (
+    #             far * near
+    #             / (far - depth_frame * (far - near))
+    #         )
+    #         print(np.min(depth_frame), np.max(depth_frame))
+    #         print(np.min(depth_frame2), np.max(depth_frame2))
+            
+    #         h, w = depth_frame.shape
+    #         u, v = np.meshgrid(np.arange(w), np.arange(h), indexing='xy')
+    #         # Normalize u, v to [-1, 1]
+    #         u = (u / (w - 1)) * 2 - 1
+    #         v = (v / (h - 1)) * 2 - 1
+    #         z = depth_frame.flatten()
+    #         # z[:, 2] = 2 * pixels[:, 2] - 1
+
+    #         # Create NDC coordinates
+    #         ndc = np.stack([u.flatten(), -v.flatten(), z, np.ones_like(z)], axis=1)
+
+    #         # Transform to world space directly using the view matrix
+    #         points_world_space_homogeneous = np.dot(tran_pix_world, ndc.T).T
+    #         points = points_world_space_homogeneous[:, :3] / points_world_space_homogeneous[:, 3, np.newaxis]
+
+    #         # Add colors to the point cloud
+    #         colors = None
+    #         if color_frame is not None:
+    #             colors = color_frame[:, :, :3].reshape(-1, 3)
+    #             print(f"Color shape: {colors.shape}")
+
+    #         seg = None
+    #         if seg_frame is not None:
+    #             seg = seg_frame.reshape(-1)
+    #             print(f"Mask shape: {seg.shape}")
+
+    #         print(f"Points shape: {points.shape}")
+    #         return points, colors, seg
+
+
+
     def get_3d_obs_by_name(self, query_name):
         """
         Retrieves 3D point cloud observations and normals of an object by its name.
@@ -449,41 +537,59 @@ class HandoverEnv(easysim.SimulatorEnv):
             seg = cam.segmentation[0].numpy()
 
             # Generate point cloud from depth
-            depth_in_meters = depth * (cam.far - cam.near) + cam.near
-            pc = self.depth_to_pointcloud(depth_in_meters, cam)
-            H = self.calculate_extrinsics(cam)
-            pc = self.pc_to_world(pc, H)
+            # depth_in_meters = depth * (cam.far - cam.near) + cam.near
+            # pc = self.depth_to_pointcloud(depth_in_meters, cam)
+            # pc = self.depth_to_pointcloud(depth, cam)
+            # H = self.calculate_extrinsics(cam)
+            # pc = self.pc_to_world(pc, H)
+            
+            # print("Got pc")
+            # # Get observations
+            # points.append(pc)
+            # masks.append(seg.reshape(-1))
 
-            # Get observations
+            # print("Got pc2")
+
+            pc, _, s = self.get_point_cloud(cam, depth, seg_frame=seg)
             points.append(pc)
-            masks.append(seg.reshape(-1))
+            masks.append(s)
             
             # estimate normals using o3d
             pcd = o3d.geometry.PointCloud()
+            print("Got pc31")
             pcd.points = o3d.utility.Vector3dVector(points[-1])
+            print("Got pc32")
             pcd.estimate_normals()
+            print("Got pc33")
             cam_normals = np.asarray(pcd.normals)
+            print("Got pc34")
             # use lookat/target vector to adjust normal vectors
             flip_indices = np.dot(cam_normals, cam.target) > 0
+            print("Got pc35")
             cam_normals[flip_indices] *= -1
+            print("Got pc36")
             normals.append(cam_normals)
+            print("Got pc3")
         points = np.concatenate(points, axis=0)
         masks = np.concatenate(masks, axis=0)
         normals = np.concatenate(normals, axis=0)
         
+        print("Get object points")
         # get object points
         obj_points = points[np.isin(masks, obj_ids)]
         if len(obj_points) == 0:
             raise ValueError(f"Object {query_name} not found in the scene")
         obj_normals = normals[np.isin(masks, obj_ids)]
+        print("Object downsample")
         
         # voxel downsample using o3d
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(obj_points)
         pcd.normals = o3d.utility.Vector3dVector(obj_normals)
-        pcd_downsampled = pcd.voxel_down_sample(voxel_size=0.001)
+        pcd_downsampled = pcd.voxel_down_sample(voxel_size=0.0005)
         obj_points = np.asarray(pcd_downsampled.points)
         obj_normals = np.asarray(pcd_downsampled.normals)
+        print("Done")
         return obj_points, obj_normals
 
     def get_scene_3d_obs(self, ignore_robot=False, ignore_grasped_obj=False):
@@ -504,15 +610,21 @@ class HandoverEnv(easysim.SimulatorEnv):
             seg = cam.segmentation[0].numpy()
 
             # Generate point cloud from depth
-            depth_in_meters = depth * (cam.far - cam.near) + cam.near
-            pc = self.depth_to_pointcloud(depth_in_meters, cam)
-            H = self.calculate_extrinsics(cam)
-            pc = self.pc_to_world(pc, H)
-
+            # depth_in_meters = depth * (cam.far - cam.near) + cam.near
+            # pc = self.depth_to_pointcloud(depth_in_meters, cam)
+            # pc = self.depth_to_pointcloud(depth, cam)
+            # H = self.calculate_extrinsics(cam)
+            # pc = self.pc_to_world(pc, H)
+            
             # Get observations
+            # points.append(pc)
+            # colors.append(color[:, :, :3].reshape(-1, 3))
+            # masks.append(seg.reshape(-1))
+
+            pc, c, s = self.get_point_cloud(cam, depth, color, seg)
             points.append(pc)
-            colors.append(color[:, :, :3].reshape(-1, 3))
-            masks.append(seg.reshape(-1))
+            colors.append(c)
+            masks.append(s)
         points = np.concatenate(points, axis=0)
         colors = np.concatenate(colors, axis=0)
         masks = np.concatenate(masks, axis=0)
@@ -540,7 +652,7 @@ class HandoverEnv(easysim.SimulatorEnv):
         pcd = o3d.geometry.PointCloud()
         pcd.points = o3d.utility.Vector3dVector(points)
         pcd.colors = o3d.utility.Vector3dVector(colors)
-        pcd_downsampled = pcd.voxel_down_sample(voxel_size=0.001)
+        pcd_downsampled = pcd.voxel_down_sample(voxel_size=0.0005)
         points = np.asarray(pcd_downsampled.points).astype(np.float16)
         colors = np.asarray(pcd_downsampled.colors).astype(np.uint8)
 
@@ -594,6 +706,8 @@ class HandoverStateEnv(HandoverEnv):
         observation["mano_body"] = self.mano.body
         # for key, val in observation.items():
         #     print(f"{key} is: {val}")
+        # for body in self.scene._bodies:
+        #     print(f"Body {body} Target position: {body.dof_target_position}")
         # print(self.scene._name_to_body)
         # print(self.scene._bodies)
         # print(self.name2ids)

@@ -279,6 +279,7 @@ class ThesisPolicy:
         """Set the waypoints for the robot to follow."""
         self._waypoints = waypoints
         self._num_waypoints = len(waypoints)
+        print(f"There are {self._num_waypoints} waypoints!")
         self._current_waypoint_index = 0
     
     def forward(self, obs):
@@ -287,6 +288,7 @@ class ThesisPolicy:
 
         if obs["frame"] < self._steps_wait:
             action = start_conf.copy()
+            # print("Current action:", action)
         else:
             if not self._done:
                 if (obs["frame"] - self._steps_wait) % self._steps_action_repeat == 0:
@@ -353,7 +355,7 @@ class ThesisPolicy:
     def _compute_ik(self, pose, cfg):
         pos = pose[0:3]
         rot = pose[3:7]
-        print("Compute ik:", pos, rot)
+        # print("Compute ik:", pos, rot)
         return self._bullet_panda.ik(cfg, pos, rot=rot)
 
     def _get_back(self, current_cfg):
@@ -364,142 +366,6 @@ class ThesisPolicy:
         back[7:9] = 0.0
         return back
 
-
-
-class BulletManipulator:
-    def __init__(
-        self,
-        hz: int,
-        cfg: DictConfig,
-        gui: bool,
-        base_pos: list,
-        base_orn: list,
-        gravity: float = 9.81,
-    ):
-        self.cfg = cfg
-        self.dt = 1.0 / hz
-
-        # Initialize PyBullet simulation
-        gui = False
-        if gui:
-            self.sim = bullet_client.BulletClient(connection_mode=pybullet.GUI)
-        else:
-            self.sim = bullet_client.BulletClient(connection_mode=pybullet.DIRECT)
-
-        urdf_path = "/home/chenam14/fairo/polymetis/polymetis/data/franka_panda/panda_arm_hand.urdf"
-
-        self.robot_id = self.sim.loadURDF(
-            urdf_path,
-            basePosition=base_pos,
-            baseOrientation=base_orn,
-            useFixedBase=True,
-            flags=pybullet.URDF_USE_INERTIA_FROM_FILE,
-        )
-        # print("ROBOT ID:", self.robot_id)
-
-        self.controlled_joints = [0, 1, 2, 3, 4, 5, 6]
-        self.gripper_controlled_joints = [9, 10]
-        self.gripper_moving_threshold = 0.002
-        self.rest_pose = [-0.13935425877571106, -0.020481698215007782, -0.05201413854956627, -2.0691256523132324, 0.05058913677930832, 2.0028650760650635, -0.9167874455451965]
-
-        for i in range(7):
-            self.sim.resetJointState(
-                bodyUniqueId=self.robot_id,
-                jointIndex=self.controlled_joints[i],
-                targetValue=self.rest_pose[i],
-                targetVelocity=0,
-            )
-
-        # Initialize states
-        self.arm_state = polymetis_pb2.RobotState()
-        self.arm_state.prev_joint_torques_computed[:] = np.zeros(7)
-        self.arm_state.prev_joint_torques_computed_safened[:] = np.zeros(7)
-        self.arm_state.motor_torques_measured[:] = np.zeros(7)
-        self.arm_state.motor_torques_external[:] = np.zeros(7)
-
-        self.arm_state.prev_command_successful = True
-        self.arm_state.error_code = 0
-
-        self.gripper_state = polymetis_pb2.GripperState()
-
-        self.t = 0
-
-    def get_arm_state(self) -> polymetis_pb2.RobotState:
-        # Timestamp
-        self.arm_state.timestamp.GetCurrentTime()
-
-        # Joint pos & vel
-        joint_cur_states = self.sim.getJointStates(
-            self.robot_id, self.controlled_joints
-        )
-        self.arm_state.joint_positions[:] = [joint_cur_states[i][0] for i in range(7)]
-        self.arm_state.joint_velocities[:] = [joint_cur_states[i][1] for i in range(7)]
-
-        return self.arm_state
-
-    def get_gripper_state(self) -> polymetis_pb2.GripperState:
-        # Timestamp
-        self.gripper_state.timestamp.GetCurrentTime()
-
-        # Gripper states
-        joint_cur_states = self.sim.getJointStates(
-            self.robot_id, self.gripper_controlled_joints
-        )
-        self.gripper_state.width = float(
-            joint_cur_states[0][0] + joint_cur_states[1][0]
-        )
-        self.gripper_state.is_grasped = False  # TODO
-        self.gripper_state.is_moving = np.all(
-            [
-                abs(joint_cur_states[i][1]) < self.gripper_moving_threshold
-                for i in range(2)
-            ]
-        )
-
-        return self.gripper_state
-
-    def apply_arm_control(self, cmd: polymetis_pb2.TorqueCommand):
-        # Extract torques
-        commanded_torques = np.array(list(cmd.joint_torques))
-
-        # Compute grav comp
-        joint_pos = list(self.arm_state.joint_positions)
-        finger_pos = [self.gripper_state.width / 2.0] * 2
-        grav_comp_torques = self.sim.calculateInverseDynamics(
-            self.robot_id,
-            joint_pos + finger_pos,
-            [0] * 9,
-            [0] * 9,
-        )[:7]
-
-        # Set sim torques
-        applied_torques = commanded_torques + grav_comp_torques
-        self.sim.setJointMotorControlArray(
-            bodyIndex=self.robot_id,
-            jointIndices=self.controlled_joints,
-            controlMode=pybullet.TORQUE_CONTROL,
-            forces=applied_torques,
-        )
-
-        # Populate torques in state
-        self.arm_state.prev_joint_torques_computed[:] = commanded_torques
-        self.arm_state.prev_joint_torques_computed_safened[:] = commanded_torques
-        self.arm_state.motor_torques_measured[:] = applied_torques
-        self.arm_state.motor_torques_external[:] = np.zeros_like(applied_torques)
-
-        self.arm_state.prev_command_successful = True
-
-    def apply_gripper_control(self, cmd: polymetis_pb2.GripperCommand):
-        self.sim.setJointMotorControlArray(
-            bodyIndex=self.robot_id,
-            jointIndices=self.gripper_controlled_joints,
-            controlMode=pybullet.POSITION_CONTROL,
-            targetPositions=[cmd.width / 2.0] * 2,
-        )
-
-    def step(self):
-        self.sim.stepSimulation()
-        self.t += self.dt
 
 def main():
     # Handover config
