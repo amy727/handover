@@ -1,6 +1,5 @@
-# Copyright (c) 2021-2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-#
-# Licensed under the BSD 3-Clause License [see LICENSE for details].
+# Policy for Thesis
+# Adapted from run_benchmark_yang_icra2021.py
 
 import os
 import handover
@@ -12,11 +11,6 @@ import hydra
 import torch
 from omegaconf import OmegaConf
 from omegaconf.dictconfig import DictConfig
-
-import polymetis_pb2
-from polymetis import RobotInterface, GripperInterface
-import polysim
-from polymetis.utils.data_dir import get_full_path_to_urdf
 
 from scipy.spatial.transform import Rotation as Rot
 
@@ -228,6 +222,7 @@ def simple_extend(q1, q2, step_size=0.1):
 
 class ThesisPolicy:
     def __init__(self, cfg, bullet_manipulator=None, time_wait=time_wait, time_action_repeat=0.1, time_close_gripper=0.5):
+        #======= Initializations copied from YangICRA2021Policy =======#
         self._cfg = cfg
         self._steps_wait = int(time_wait / self._cfg.SIM.TIME_STEP)
         self._steps_action_repeat = int(time_action_repeat / self._cfg.SIM.TIME_STEP)
@@ -250,11 +245,11 @@ class ThesisPolicy:
         )
         self._at_grasp_pose = AtPoseCondition(position_tol=0.005, rotation_tol=np.radians(15.0))
 
-        # self._bullet_panda = bullet_manipulator
         self._bullet_panda = BulletPanda(
             panda_urdf_file, self._cfg.ENV.PANDA_BASE_POSITION, self._cfg.ENV.PANDA_BASE_ORIENTATION
         )
 
+        #======= Initializations for setting up waypoints =======#
         self._waypoints = None
         self._num_waypoints = 0
         self._current_waypoint_index = 0
@@ -277,6 +272,7 @@ class ThesisPolicy:
 
     def set_waypoints(self, waypoints):
         """Set the waypoints for the robot to follow."""
+        waypoints = waypoints[:-2] # Don't move all the way to the last waypoint to avoid object collision
         self._waypoints = waypoints
         self._num_waypoints = len(waypoints)
         print(f"There are {self._num_waypoints} waypoints!")
@@ -299,10 +295,10 @@ class ThesisPolicy:
                     action = self._get_action(current_cfg, waypoint)
                     self._action_repeat = action.copy()
                     self._current_waypoint_index += 1
-                    if self._current_waypoint_index == self._num_waypoints:
+                    if self._current_waypoint_index >= self._num_waypoints:
                         self._done = True
-                    print("Current waypoint:", waypoint)
-                    print("Current action:", action)
+                    # print("Current waypoint:", waypoint)
+                    # print("Current action:", action)
                 else:
                     action = self._action_repeat.copy()
 
@@ -371,10 +367,10 @@ def main():
     # Handover config
     handover_cfg = get_config_from_args()
     handover_cfg.BENCHMARK.SETUP = "s0"
-    handover_cfg.SIM.RENDER = True
+    handover_cfg.SIM.RENDER = False
     handover_cfg.ENV.RENDER_OFFSCREEN = True
-    # handover_cfg.BENCHMARK.SAVE_RESULT = True
-    # handover_cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER = True
+    handover_cfg.BENCHMARK.SAVE_RESULT = True 
+    handover_cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER = True
 
     policy = ThesisPolicy(handover_cfg)
 

@@ -59,6 +59,36 @@ class LMP_interface():
       obs_dict['_position_world'] = table_center
       obs_dict['normal'] = np.array([0, 0, 1])
       obs_dict['aabb'] = np.array([self._world_to_voxel(table_min_world), self._world_to_voxel(table_max_world)])
+    # elif obj_name.lower() == 'ycb_02':
+    #   obs_dict = dict()
+    #   obs_dict['name'] = obj_name
+    #   obj_pos = [0.60484003,  0.08386952,  1.38495083]
+    #   obs_dict['position'] = obj_pos
+    #   obs_dict['aabb'] = np.array([obj_pos, obj_pos])
+    #   obs_dict['_position_world'] = obj_pos
+      # obj_pc, obj_normal = self._env.get_3d_obs_by_name(obj_name)
+      # voxel_map = self._points_to_voxel_map(obj_pc)
+      # aabb_min = self._world_to_voxel(np.min(obj_pc, axis=0))
+      # aabb_max = self._world_to_voxel(np.max(obj_pc, axis=0))
+      # # obs_dict['occupancy_map'] = voxel_map  # in voxel frame
+      # # obs_dict['aabb'] = np.array([aabb_min, aabb_max])  # in voxel frame
+      # # obs_dict['_position_world'] = np.mean(obj_pc, axis=0)  # in world frame
+      # obs_dict['_point_cloud_world'] = obj_pc  # in world frame
+      # obs_dict['normal'] = normalize_vector(obj_normal.mean(axis=0))
+    # elif obj_name.startswith('ycb'):
+    #   obs_dict = dict()
+    #   obj_pc, obj_normal = self._env.get_3d_obs_by_name(obj_name)
+    #   grasp_point = self.find_grasp_points(obj_pc)
+    #   voxel_map = self._points_to_voxel_map(obj_pc)
+    #   aabb_min = self._world_to_voxel(np.min(obj_pc, axis=0))
+    #   aabb_max = self._world_to_voxel(np.max(obj_pc, axis=0))
+    #   obs_dict['occupancy_map'] = voxel_map  # in voxel frame
+    #   obs_dict['name'] = obj_name
+    #   obs_dict['position'] = self._world_to_voxel(grasp_point)  # in voxel frame
+    #   obs_dict['aabb'] = np.array([aabb_min, aabb_max])  # in voxel frame
+    #   obs_dict['_position_world'] = grasp_point  # in world frame
+    #   obs_dict['_point_cloud_world'] = obj_pc  # in world frame
+    #   obs_dict['normal'] = normalize_vector(obj_normal.mean(axis=0))
     else:
       obs_dict = dict()
       obj_pc, obj_normal = self._env.get_3d_obs_by_name(obj_name)
@@ -75,6 +105,83 @@ class LMP_interface():
 
     object_obs = Observation(obs_dict)
     return object_obs
+
+  def find_grasp_points(self, point_cloud):
+    # Compute the centroid and major axis of the point cloud
+    centroid, major_axis = self.compute_principal_components(point_cloud)
+    
+    # Oriented Bounding Box to understand dimensions and orientation
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(point_cloud)
+    obb = pcd.get_oriented_bounding_box()
+    obb_extent = obb.extent  # Lengths of the box edges
+    
+    # Determine potential grasp points
+    # For example, use the major axis and dimensions to suggest grasp locations
+    grasp_points = {
+        'along_major_axis': centroid + obb_extent[0] * major_axis * 0.5,
+        'opposite_point': centroid - obb_extent[0] * major_axis * 0.5
+    }
+    return grasp_points['along_major_axis']
+  
+  def compute_principal_components(self, point_cloud):
+    # Calculate the centroid of the point cloud
+    centroid = np.mean(point_cloud, axis=0)
+
+    # Center the point cloud by subtracting the centroid
+    centered_points = point_cloud - centroid
+
+    # Compute the covariance matrix
+    H = np.dot(centered_points.T, centered_points)
+
+    # Perform eigenvalue decomposition to get the principal components
+    eigen_values, eigen_vectors = np.linalg.eigh(H)
+
+    # Sort the principal components by eigenvalues in descending order
+    sorted_indices = np.argsort(eigen_values)[::-1]
+    major_axis = eigen_vectors[:, sorted_indices[0]]  # Major axis is the eigenvector with the largest eigenvalue
+
+    return major_axis, centroid
+
+  def get_affordance_map(self, ycb_obj):
+    affordance_map = self.get_empty_affordance_map()
+    x, y, z = ycb_obj.position
+    affordance_map[x, y, z] = 1
+    return affordance_map
+
+  def get_avoidance_map(self, table, hand):
+    avoidance_map = self.get_empty_avoidance_map()
+    self.set_voxel_by_radius(avoidance_map, table.position, radius_cm=10, value=1)
+    if hand:
+      self.set_voxel_by_radius(avoidance_map, hand.position, radius_cm=5, value=1)
+    return avoidance_map
+
+  def get_gripper_map(self, ycb_obj):
+    gripper_map = self.get_empty_gripper_map()
+    # open everywhere
+    gripper_map[:, :, :] = 1
+    # close when 1cm around ycb_obj
+    self.set_voxel_by_radius(gripper_map, ycb_obj.position, radius_cm=1, value=0)
+    return gripper_map
+  
+  def call(self, instruction, obj_name, hand_name):
+    
+    print(f"Detecting {obj_name} and {hand_name}")
+    gripper = DynamicObservation(lambda: self.detect('gripper'))
+    ycb_obj = DynamicObservation(lambda: self.detect(obj_name))
+    table = DynamicObservation(lambda: self.detect('table'))
+    if hand_name == "subject":
+      hand = None
+    else:
+      hand = DynamicObservation(lambda: self.detect(hand_name))
+    
+    affordance_map = lambda: self.get_affordance_map(ycb_obj)
+    avoidance_map = lambda: self.get_avoidance_map(table, hand)
+    gripper_map = lambda: self.get_gripper_map(ycb_obj)
+    
+
+    self.execute(gripper, affordance_map=affordance_map, avoidance_map=avoidance_map, gripper_map=gripper_map)
+
   
   def execute(self, movable_obs_func, affordance_map=None, avoidance_map=None, rotation_map=None,
               velocity_map=None, gripper_map=None):
@@ -139,66 +246,82 @@ class LMP_interface():
         step_info['avoidance_map'] = _avoidance_map
 
         # visualize
-        if self._cfg['visualize']:
-          assert self._env.visualizer is not None
-          step_info['start_pos_world'] = self._voxel_to_world(start_pos)
-          step_info['targets_world'] = self._voxel_to_world(planner_info['targets_voxel'])
-          self._env.visualizer.visualize(step_info)
-          self._env.visualizer.visualize_nowaypoints(step_info)
-          self._env.visualizer.visualize_affordance(step_info)
-          self._env.visualizer.visualize_avoidance(step_info)
+        # if self._cfg['visualize']:
+        #   assert self._env.visualizer is not None
+        #   step_info['start_pos_world'] = self._voxel_to_world(start_pos)
+        #   step_info['targets_world'] = self._voxel_to_world(planner_info['targets_voxel'])
+        #   self._env.visualizer.visualize(step_info)
+        #   self._env.visualizer.visualize_nowaypoints(step_info)
+        #   self._env.visualizer.visualize_affordance(step_info)
+        #   self._env.visualizer.visualize_avoidance(step_info)
         
         execute_info.append(step_info)
         # print("Step info:", step_info)
     self._env.execute_info = execute_info
+    #     # execute path
+    #     print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] start executing path via controller ({len(traj_world)} waypoints){bcolors.ENDC}')
+    #     controller_infos = dict()
+    #     for i, waypoint in enumerate(traj_world):
+    #       # check if the movement is finished
+    #       if np.linalg.norm(movable_obs['_position_world'] - traj_world[-1][0]) <= 0.01:
+    #         print(f"{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] reached last waypoint; curr_xyz={movable_obs['_position_world']}, target={traj_world[-1][0]} (distance: {np.linalg.norm(movable_obs['_position_world'] - traj_world[-1][0]):.3f})){bcolors.ENDC}")
+    #         break
+    #       # skip waypoint if moving to this point is going in opposite direction of the final target point
+    #       # (for example, if you have over-pushed an object, no need to move back)
+    #       if i != 0 and i != len(traj_world) - 1:
+    #         movable2target = traj_world[-1][0] - movable_obs['_position_world']
+    #         movable2waypoint = waypoint[0] - movable_obs['_position_world']
+    #         if np.dot(movable2target, movable2waypoint).round(3) <= 0:
+    #           print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] skip waypoint {i+1} because it is moving in opposite direction of the final target{bcolors.ENDC}')
+    #           continue
+    #       # execute waypoint
+    #       controller_info = self._controller.execute(movable_obs, waypoint)
+    #       # loggging
+    #       movable_obs = movable_obs_func()
+    #       dist2target = np.linalg.norm(movable_obs['_position_world'] - traj_world[-1][0])
+    #       if not object_centric and controller_info['mp_info'] == -1:
+    #         print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] failed waypoint {i+1} (wp: {waypoint[0].round(3)}, actual: {movable_obs["_position_world"].round(3)}, target: {traj_world[-1][0].round(3)}, start: {traj_world[0][0].round(3)}, dist2target: {dist2target.round(3)}); mp info: {controller_info["mp_info"]}{bcolors.ENDC}')
+    #       else:
+    #         print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] completed waypoint {i+1} (wp: {waypoint[0].round(3)}, actual: {movable_obs["_position_world"].round(3)}, target: {traj_world[-1][0].round(3)}, start: {traj_world[0][0].round(3)}, dist2target: {dist2target.round(3)}){bcolors.ENDC}')
+    #       controller_info['controller_step'] = i
+    #       controller_info['target_waypoint'] = waypoint
+    #       controller_infos[i] = controller_info
+    #     step_info['controller_infos'] = controller_infos
+    #     execute_info.append(step_info)
+    #     # check whether we need to replan
+    #     curr_pos = movable_obs['position']
+    #     if distance_transform_edt(1 - _affordance_map)[tuple(curr_pos)] <= 2:
+    #       print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] reached target; terminating {bcolors.ENDC}')
+    #       break
+    # print(f'{bcolors.OKBLUE}[interfaces.py | {get_clock_time()}] finished executing path via controller{bcolors.ENDC}')
+
+    # # make sure we are at the final target position and satisfy any additional parametrization
+    # # (skip if we are specifying object-centric motion)
+    # if not object_centric:
+    #   try:
+    #     # traj_world: world_xyz, rotation, velocity, gripper
+    #     ee_pos_world = traj_world[-1][0]
+    #     ee_rot_world = traj_world[-1][1]
+    #     ee_pose_world = np.concatenate([ee_pos_world, ee_rot_world])
+    #     ee_speed = traj_world[-1][2]
+    #     gripper_state = traj_world[-1][3]
+    #   except:
+    #     # evaluate latest voxel map
+    #     _rotation_map = rotation_map()
+    #     _velocity_map = velocity_map()
+    #     _gripper_map = gripper_map()
+    #     # get last ee pose
+    #     ee_pos_world = self._env.get_ee_pos()
+    #     ee_pos_voxel = self.get_ee_pos()
+    #     ee_rot_world = _rotation_map[ee_pos_voxel[0], ee_pos_voxel[1], ee_pos_voxel[2]]
+    #     ee_pose_world = np.concatenate([ee_pos_world, ee_rot_world])
+    #     ee_speed = _velocity_map[ee_pos_voxel[0], ee_pos_voxel[1], ee_pos_voxel[2]]
+    #     gripper_state = _gripper_map[ee_pos_voxel[0], ee_pos_voxel[1], ee_pos_voxel[2]]
+    #   # move to the final target
+    #   self._env.apply_action(np.concatenate([ee_pose_world, [gripper_state]]))
 
     return execute_info
-
-  # ======================================================
-  # == If there is a execution procedure that needs to 
-  # == always run the same way, you can hard-code the 
-  # == following functions and write the procedure in the
-  # == call function.
-  # ======================================================
-  def get_affordance_map(self, ycb_obj):
-    affordance_map = self.get_empty_affordance_map()
-    x, y, z = ycb_obj.position
-    affordance_map[x, y, z] = 1
-    return affordance_map
-
-  def get_avoidance_map(self, table, hand):
-    avoidance_map = self.get_empty_avoidance_map()
-    self.set_voxel_by_radius(avoidance_map, table.position, radius_cm=10, value=1)
-    if hand:
-      self.set_voxel_by_radius(avoidance_map, hand.position, radius_cm=5, value=1)
-    return avoidance_map
-
-  def get_gripper_map(self, ycb_obj):
-    gripper_map = self.get_empty_gripper_map()
-    # open everywhere
-    gripper_map[:, :, :] = 1
-    # close when 1cm around ycb_obj
-    self.set_voxel_by_radius(gripper_map, ycb_obj.position, radius_cm=1, value=0)
-    return gripper_map
   
-  def call(self, instruction, obj_name, hand_name):
-    
-    print(f"Detecting {obj_name} and {hand_name}")
-    gripper = DynamicObservation(lambda: self.detect('gripper'))
-    ycb_obj = DynamicObservation(lambda: self.detect(obj_name))
-    table = DynamicObservation(lambda: self.detect('table'))
-    if hand_name == "subject":
-      hand = None
-    else:
-      hand = DynamicObservation(lambda: self.detect(hand_name))
-    
-    affordance_map = lambda: self.get_affordance_map(ycb_obj)
-    avoidance_map = lambda: self.get_avoidance_map(table, hand)
-    gripper_map = lambda: self.get_gripper_map(ycb_obj)
-
-    self.execute(gripper, affordance_map=affordance_map, avoidance_map=avoidance_map, gripper_map=gripper_map)
-  # ======================================================
-
   def cm2index(self, cm, direction):
     if isinstance(direction, str) and direction == 'x':
       x_resolution = self._resolution[0] * 100  # resolution is in m, we need cm
@@ -240,6 +363,38 @@ class LMP_interface():
   def pointat2quat(self, vector):
     assert isinstance(vector, np.ndarray) and vector.shape == (3,), f'vector: {vector}'
     return pointat2quat(vector)
+
+  def vec2quat(self, vector):
+    # Normalize the input vector
+    target = np.array(vector)  # Use the provided vector directly
+    target = target / np.linalg.norm(target)  # Ensure it's a unit vector
+    
+    # Z-axis (default facing direction)
+    z_axis = np.array([0, 0, 1])
+    
+    # Calculate the axis of rotation (cross product of z_axis and target)
+    axis = np.cross(z_axis, target)
+    axis_norm = np.linalg.norm(axis)
+    if axis_norm == 0:
+        # Special case where the target vector is parallel or antiparallel to z_axis
+        return np.array([1, 0, 0, 0]) if np.allclose(target, z_axis) else np.array([0, 1, 0, 0])
+    
+    # Normalize the axis to get a unit vector
+    axis = axis / axis_norm
+    
+    # Calculate the angle of rotation
+    angle = np.arccos(np.dot(z_axis, target))
+    
+    # Calculate the quaternion using the axis-angle formula
+    half_angle = angle / 2
+    q = np.array([
+        np.cos(half_angle),
+        np.sin(half_angle) * axis[0],
+        np.sin(half_angle) * axis[1],
+        np.sin(half_angle) * axis[2]
+    ])
+    
+    return q
 
   def set_voxel_by_radius(self, voxel_map, voxel_xyz, radius_cm=0, value=1):
     """given a 3D np array, set the value of the voxel at voxel_xyz to value. If radius is specified, set the value of all voxels within the radius to value."""

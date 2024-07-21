@@ -36,26 +36,32 @@ class HandoverEnv(easysim.SimulatorEnv):
         if self.cfg.ENV.RENDER_OFFSCREEN:
             self._render_offscreen_init()
 
-        # Hardcode workspace bounds for now
-        # self.workspace_bounds_min = np.array([-20,-20,-20])
-        # self.workspace_bounds_max = np.array([20,20,20])
-        self.workspace_bounds_min = np.array([-2,-2,-2])
-        self.workspace_bounds_max = np.array([5,5,5])
 
-        # print("HANDOVER:", self._simulator)
+    def set_workspace_bounds(self, workspace_bounds_min, workspace_bounds_max):
+        self.workspace_bounds_min = workspace_bounds_min
+        self.workspace_bounds_max = workspace_bounds_max
 
     def set_up_objects(self):
+        """
+        Setup a mapping between the names of all objects and their ids so that objects
+        can be easily queried later on.
+        Also saves the names of the hand and object that is handed over.  
+        """
         self.name2ids = {}
         self.ycb_name = "ycb"
+        self.hand_name = "subject"
         for name, obj in self.scene._name_to_body.items():
             self.name2ids[name] = self.scene._bodies.index(obj) + 1
             print(name, obj, self.scene.ycb_obj)
             if obj == self.scene.ycb_obj:
                 self.ycb_name = name
+            elif "subject" in name:
+                self.hand_name = name
         print(f"name2ids {self.name2ids}")
 
     def get_object_names(self):
         obj_names = list(self.scene._name_to_body.keys())
+        print("OBJ", self.mano.body)
         print(f"obj names: {obj_names}")
         return obj_names
 
@@ -97,8 +103,17 @@ class HandoverEnv(easysim.SimulatorEnv):
         self.scene.add_camera(camera)
         self._camera = camera
 
-        # print("HANDOVER2:", self._simulator)
-        # print("SCENE CAMERAS:", self._simulator._cameras)
+        camera = easysim.Camera()
+        camera.name = "cam2"
+        camera.width = self.cfg.ENV.OFFSCREEN_RENDERER_CAMERA_WIDTH
+        camera.height = self.cfg.ENV.OFFSCREEN_RENDERER_CAMERA_HEIGHT
+        camera.vertical_fov = self.cfg.ENV.OFFSCREEN_RENDERER_CAMERA_VERTICAL_FOV
+        camera.near = self.cfg.ENV.OFFSCREEN_RENDERER_CAMERA_NEAR
+        camera.far = self.cfg.ENV.OFFSCREEN_RENDERER_CAMERA_FAR
+        camera.position = self.cfg.ENV.OFFSCREEN_RENDERER_CAMERA_POSITION2
+        camera.target = self.cfg.ENV.OFFSCREEN_RENDERER_CAMERA_TARGET2
+        camera.up_vector = (0.0, 0.0, 1.0)
+        self.scene.add_camera(camera)
 
     def pre_reset(self, env_ids, scene_id):
         self.ycb.reset(scene_id)
@@ -350,7 +365,7 @@ class HandoverEnv(easysim.SimulatorEnv):
 
     def get_ee_pose(self):
         ee_pose = self.panda._body.link_state[0, self.panda.LINK_IND_HAND, :].numpy()
-        print(f"ee link pose: {ee_pose}")
+        # print(f"ee link pose: {ee_pose}")
         return ee_pose
 
     def get_ee_pos(self):
@@ -359,79 +374,28 @@ class HandoverEnv(easysim.SimulatorEnv):
     def get_ee_quat(self):
         return self.get_ee_pose()[3:7]
 
-    def calculate_extrinsics(self, camera):
-        # Calculate forward vector
-        forward = np.array(camera.target) - np.array(camera.position)
-        forward = forward / np.linalg.norm(forward)
+    def set_camera_matrices(self, view_matrix, projection_matrix):
+        """
+        Set view and projection matrix for all the cameras
+        If there are multiple cameras, it would be a dictionary with the camera name as the key
+        and the view/projection matrix as the value.
+        """
+        self.view_matrix = view_matrix
+        self.proj_matrix = projection_matrix
 
-        # Calculate right vector
-        right = np.cross(forward, np.array(camera.up_vector))
-        right = right / np.linalg.norm(right)
-
-        # Calculate up vector
-        up = np.cross(right, forward)
-
-        # Create rotation matrix
-        R = np.stack([right, up, -forward], axis=1)
-
-        # Translation vector
-        T = -R @ np.array(camera.position)
-
-        # Homogeneous matrix
-        H = np.zeros((4, 4))
-        H[:3, :3] = R
-        H[:3, 3] = T
-        H[3, 3] = 1
-
-        print("EXTRINSICS:", H)
-
-        return H
-
-    def set_camera(self, view_matrix, projection_matrix):
-        self.view_matrix = np.array(view_matrix['offscreen_renderer']).reshape([4, 4], order="F")
-        # self.view_matrix = np.array([[1., 0., 0., 0.5],
-        #                     [0., 0., -1., -0.4],
-        #                     [0., 1., 0., 1.2],
-        #                     [0., 0., 0., 1.]])
-        self.proj_matrix = np.array(projection_matrix['offscreen_renderer']).reshape([4, 4], order="F")
-        print("VIEW MATRIX", self.view_matrix)
-        print("PROJ MATRIX", self.proj_matrix)
-
-    def pc_to_world(self, points, H):
-        # Calculate the inverse of the homogeneous transformation matrix
-        H_inv = np.linalg.inv(H)
-        
-        # Convert points to homogeneous coordinates
-        ones = np.ones((points.shape[0], 1))
-        points_homogeneous = np.hstack([points, ones])
-        
-        # Apply the transformation
-        points_world_homogeneous = np.dot(H, points_homogeneous.T).T
-        
-        # Convert back from homogeneous coordinates
-        points_world = points_world_homogeneous[:, :3] / points_world_homogeneous[:, 3, np.newaxis]
-        return points_world
-
-    def depth_to_pointcloud(self, depth, camera):
-        h, w = depth.shape
-        vertical_fov = np.radians(camera.vertical_fov)
-        focal_length = h / (2 * np.tan(vertical_fov / 2))
-
-        u, v = np.meshgrid(np.arange(w), np.arange(h), indexing='xy')
-        z = depth.flatten()
-        x = (u.flatten() - w / 2) * z / focal_length
-        y = (v.flatten() - h / 2) * z / focal_length
-
-        points = np.stack([x, -y, -z], axis=1)
-        return points
+        # print("VIEW MATRICES", self.view_matrix)
+        # print("PROJ MATRICES", self.proj_matrix)
 
     def get_point_cloud(self, camera, depth_frame, color_frame=None, seg_frame=None):
-        tran_pix_world = np.linalg.inv(np.matmul(self.proj_matrix, self.view_matrix))
+        """Generates a point cloud from depth, color, and segmentation frames."""
+        view_matrix = np.array(self.view_matrix[camera.name]).reshape([4, 4], order="F")
+        proj_matrix = np.array(self.proj_matrix[camera.name]).reshape([4, 4], order="F")
+        tran_pix_world = np.linalg.inv(np.matmul(proj_matrix, view_matrix))
 
         if depth_frame is not None:
             depth_frame = np.array(depth_frame, copy=True)
             height, width = depth_frame.shape
-            print("Depth shape:", width, height)
+            # print("Depth shape:", width, height)
 
             # create a grid with pixel coordinates and depth values
             y, x = np.mgrid[-1 : 1 : 2 / height, -1 : 1 : 2 / width]
@@ -449,74 +413,25 @@ class HandoverEnv(easysim.SimulatorEnv):
             points /= points[:, 3:4]
             points = points[:, :3]
 
-            # # Visualize the point cloud points
-            # pcl = o3d.geometry.PointCloud()
-            # pcl.points = o3d.utility.Vector3dVector(points)
-
             # Add colors to the point cloud
             colors = None
             if color_frame is not None:
                 colors = color_frame[:, :, :3].reshape(-1, 3)
-                print(f"Color shape: {colors.shape}")
+                # print(f"Color shape: {colors.shape}")
 
             seg = None
             if seg_frame is not None:
                 seg = seg_frame.reshape(-1)
-                print(f"Mask shape: {seg.shape}")
+                # print(f"Mask shape: {seg.shape}")
 
-            print(f"Points shape: {points.shape}")
+            # print(f"Points shape: {points.shape}")
             return points, colors, seg
-
-    # def get_point_cloud(self, camera, depth_frame, color_frame=None, seg_frame=None):
-    #     tran_pix_world = np.linalg.inv(np.matmul(self.proj_matrix, self.view_matrix))
-
-    #     if depth_frame is not None:
-    #         print("======= DEPTH ========")
-    #         far = camera.far
-    #         near = camera.near
-
-    #         # Compute the original depth values
-    #         depth_frame2 = (
-    #             far * near
-    #             / (far - depth_frame * (far - near))
-    #         )
-    #         print(np.min(depth_frame), np.max(depth_frame))
-    #         print(np.min(depth_frame2), np.max(depth_frame2))
-            
-    #         h, w = depth_frame.shape
-    #         u, v = np.meshgrid(np.arange(w), np.arange(h), indexing='xy')
-    #         # Normalize u, v to [-1, 1]
-    #         u = (u / (w - 1)) * 2 - 1
-    #         v = (v / (h - 1)) * 2 - 1
-    #         z = depth_frame.flatten()
-    #         # z[:, 2] = 2 * pixels[:, 2] - 1
-
-    #         # Create NDC coordinates
-    #         ndc = np.stack([u.flatten(), -v.flatten(), z, np.ones_like(z)], axis=1)
-
-    #         # Transform to world space directly using the view matrix
-    #         points_world_space_homogeneous = np.dot(tran_pix_world, ndc.T).T
-    #         points = points_world_space_homogeneous[:, :3] / points_world_space_homogeneous[:, 3, np.newaxis]
-
-    #         # Add colors to the point cloud
-    #         colors = None
-    #         if color_frame is not None:
-    #             colors = color_frame[:, :, :3].reshape(-1, 3)
-    #             print(f"Color shape: {colors.shape}")
-
-    #         seg = None
-    #         if seg_frame is not None:
-    #             seg = seg_frame.reshape(-1)
-    #             print(f"Mask shape: {seg.shape}")
-
-    #         print(f"Points shape: {points.shape}")
-    #         return points, colors, seg
-
 
 
     def get_3d_obs_by_name(self, query_name):
         """
         Retrieves 3D point cloud observations and normals of an object by its name.
+        This is called by voxposer.
 
         Args:
             query_name (str): The name of the object to query.
@@ -536,51 +451,31 @@ class HandoverEnv(easysim.SimulatorEnv):
             depth = cam.depth[0].numpy()
             seg = cam.segmentation[0].numpy()
 
-            # Generate point cloud from depth
-            # depth_in_meters = depth * (cam.far - cam.near) + cam.near
-            # pc = self.depth_to_pointcloud(depth_in_meters, cam)
-            # pc = self.depth_to_pointcloud(depth, cam)
-            # H = self.calculate_extrinsics(cam)
-            # pc = self.pc_to_world(pc, H)
-            
-            # print("Got pc")
-            # # Get observations
-            # points.append(pc)
-            # masks.append(seg.reshape(-1))
-
-            # print("Got pc2")
-
+            # Generate point cloud
             pc, _, s = self.get_point_cloud(cam, depth, seg_frame=seg)
             points.append(pc)
             masks.append(s)
             
             # estimate normals using o3d
             pcd = o3d.geometry.PointCloud()
-            print("Got pc31")
             pcd.points = o3d.utility.Vector3dVector(points[-1])
-            print("Got pc32")
             pcd.estimate_normals()
-            print("Got pc33")
             cam_normals = np.asarray(pcd.normals)
-            print("Got pc34")
             # use lookat/target vector to adjust normal vectors
             flip_indices = np.dot(cam_normals, cam.target) > 0
-            print("Got pc35")
             cam_normals[flip_indices] *= -1
-            print("Got pc36")
             normals.append(cam_normals)
-            print("Got pc3")
         points = np.concatenate(points, axis=0)
         masks = np.concatenate(masks, axis=0)
         normals = np.concatenate(normals, axis=0)
         
-        print("Get object points")
+        # print("Get object points")
         # get object points
         obj_points = points[np.isin(masks, obj_ids)]
         if len(obj_points) == 0:
             raise ValueError(f"Object {query_name} not found in the scene")
         obj_normals = normals[np.isin(masks, obj_ids)]
-        print("Object downsample")
+        # print("Object downsample")
         
         # voxel downsample using o3d
         pcd = o3d.geometry.PointCloud()
@@ -589,8 +484,75 @@ class HandoverEnv(easysim.SimulatorEnv):
         pcd_downsampled = pcd.voxel_down_sample(voxel_size=0.0005)
         obj_points = np.asarray(pcd_downsampled.points)
         obj_normals = np.asarray(pcd_downsampled.normals)
-        print("Done")
+        # print("Done")
         return obj_points, obj_normals
+
+    def get_obj_points(self, query_name):
+        """
+        Retrieves 3D point cloud observations and normals of an object by its name.
+        This is called by voxposer.
+
+        Args:
+            query_name (str): The name of the object to query.
+
+        Returns:
+            tuple: A tuple containing object points and object normals.
+        """
+        assert query_name in self.name2ids, f"Unknown object name: {query_name}"
+        obj_ids = self.name2ids[query_name]
+        
+        # gather points and masks from all cameras
+        points, masks = [], []
+        for cam in self.scene._cameras:
+            depth = cam.depth[0].numpy()
+            seg = cam.segmentation[0].numpy()
+
+            # Generate point cloud
+            pc, _, s = self.get_point_cloud(cam, depth, seg_frame=seg)
+            points.append(pc)
+            masks.append(s)
+            
+        points = np.concatenate(points, axis=0)
+        masks = np.concatenate(masks, axis=0)
+        
+        # print("Get object points")
+        # get object points
+        obj_points = points[np.isin(masks, obj_ids)]
+        if len(obj_points) == 0:
+            raise ValueError(f"Object {query_name} not found in the scene")
+
+        return obj_points
+
+    def calculate_distances(self, waypoint, object_points):
+        """
+        Calculate the Euclidean distances from a single waypoint to all the points in an object.
+        Can be used to help with calculations of minimum distances of the waypoint to the hand
+        to evaluate safety.
+
+        Parameters:
+        - waypoint (array-like): The 3D coordinates of the waypoint, format: [x, y, z].
+        - object_points (array-like): An Nx3 array containing the 3D coordinates of N object points.
+
+        Returns:
+        - distances (numpy.ndarray): An array of distances from the waypoint to each object point.
+        """
+        # Convert the inputs to NumPy arrays to ensure compatibility with NumPy operations
+        waypoint = np.array(waypoint)
+        object_points = np.array(object_points)
+
+        # Calculate the differences in each dimension
+        differences = object_points - waypoint
+
+        # Calculate the squared differences
+        squared_differences = differences ** 2
+
+        # Sum the squared differences across the columns (i.e., sum over x, y, z differences)
+        sum_squared_differences = np.sum(squared_differences, axis=1)
+
+        # Take the square root of the sum of squared differences to get the Euclidean distances
+        distances = np.sqrt(sum_squared_differences)
+
+        return np.min(distances)
 
     def get_scene_3d_obs(self, ignore_robot=False, ignore_grasped_obj=False):
         """
@@ -608,18 +570,6 @@ class HandoverEnv(easysim.SimulatorEnv):
             color = cam.color[0].numpy()
             depth = cam.depth[0].numpy()
             seg = cam.segmentation[0].numpy()
-
-            # Generate point cloud from depth
-            # depth_in_meters = depth * (cam.far - cam.near) + cam.near
-            # pc = self.depth_to_pointcloud(depth_in_meters, cam)
-            # pc = self.depth_to_pointcloud(depth, cam)
-            # H = self.calculate_extrinsics(cam)
-            # pc = self.pc_to_world(pc, H)
-            
-            # Get observations
-            # points.append(pc)
-            # colors.append(color[:, :, :3].reshape(-1, 3))
-            # masks.append(seg.reshape(-1))
 
             pc, c, s = self.get_point_cloud(cam, depth, color, seg)
             points.append(pc)
@@ -668,25 +618,7 @@ class HandoverEnv(easysim.SimulatorEnv):
         data["depth"] = self._camera.depth[0].numpy()
         data["segmentation"] = self._camera.segmentation[0].numpy()
 
-        # Generate point cloud from depth
-        # depth_in_meters = data["depth"] * (self._camera.far - self._camera.near) + self._camera.near
-        # pointcloud = self.depth_to_pointcloud(depth_in_meters)
-
-        # TODO: Transform to world frame
-        
-        # data["pc"] = self.get_scene_3d_obs()
-        # print("==== pc ====")
-        # print(f'pc type: {type(data["pc"][0])}, pc shape: {data["pc"][0].shape}')
-        # print(f'color type: {type(data["pc"][1])}, color shape: {data["pc"][1].shape}')
-        # print(f'unique segmenation values: {np.unique(data["segmentation"])}')
-
-        # data["pc_obj"] = self.get_3d_obs_by_name("table")
-        
-        print("IMG", data["color"].shape)
-        print("DEPTH", data["depth"].shape)
-        print("SEGMENTATION", data["segmentation"].shape)
         return data
-        # return self._camera.color[0].numpy()
 
     def callback_get_reward_post_status(self, reward, status):
         """ """
@@ -704,13 +636,6 @@ class HandoverStateEnv(HandoverEnv):
         observation["ycb_classes"] = self.ycb.CLASSES
         observation["ycb_bodies"] = self.ycb.bodies
         observation["mano_body"] = self.mano.body
-        # for key, val in observation.items():
-        #     print(f"{key} is: {val}")
-        # for body in self.scene._bodies:
-        #     print(f"Body {body} Target position: {body.dof_target_position}")
-        # print(self.scene._name_to_body)
-        # print(self.scene._bodies)
-        # print(self.name2ids)
         return observation
 
     def _get_reward(self):

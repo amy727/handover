@@ -31,7 +31,8 @@ class ValueMapVisualizer:
         self.quality = quality
         if self.quality == 'low':
             self.downsample_ratio = 4
-            self.max_scene_points = 150000
+            # self.max_scene_points = 150000
+            self.max_scene_points = 15000
             self.costmap_opacity = 0.2 * 0.6
             self.costmap_surface_count = 10
         elif self.quality == 'low-full-scene':
@@ -72,7 +73,8 @@ class ValueMapVisualizer:
         else:
             raise ValueError(f'Unknown quality: {self.quality}; should be one of [low, medium, high]')
 
-    def update_scene_points(self, points, colors=None):
+    def update_scene_points(self, idx, points, colors=None):
+        self.scene_idx = idx
         points = points.astype(np.float16)
         assert colors.dtype == np.uint8
         self.scene_points = (points, colors)
@@ -153,12 +155,280 @@ class ValueMapVisualizer:
         # save and show
         if save and self.save_dir is not None:
             curr_time = datetime.datetime.now()
-            log_id = f'{curr_time.hour}:{curr_time.minute}:{curr_time.second}'
+            log_id = f'{self.scene_idx:04}_{curr_time.hour}:{curr_time.minute}:{curr_time.second}'
             save_path = os.path.join(self.save_dir, log_id + '.html')
             latest_save_path = os.path.join(self.save_dir, 'latest.html')
             print('** saving visualization to', save_path, '...')
             fig.write_html(save_path)
             print('** saving visualization to', latest_save_path, '...')
+            fig.write_html(latest_save_path)
+            print(f'** save to {save_path}')
+        if show:
+            fig.show()
+
+        return fig
+
+    def visualize_nowaypoints(self, info, show=False, save=True):
+        """visualize the path and relevant info using plotly"""
+        planner_info = info['planner_info']
+        # waypoints_world = np.array([p[0] for p in info['traj_world']])
+        # start_pos_world = info['start_pos_world']
+        # assert len(start_pos_world.shape) == 1
+        # waypoints_world = np.concatenate([start_pos_world[None, ...], waypoints_world], axis=0)
+        
+        fig_data = []
+        # plot path
+        # add marker to path waypoints
+        # fig_data.append(go.Scatter3d(x=waypoints_world[:, 0], y=waypoints_world[:, 1], z=waypoints_world[:, 2], mode='markers', name='waypoints', marker=dict(size=4, color='red')))
+        # # add lines between waypoints
+        # for i in range(waypoints_world.shape[0] - 1):
+        #     fig_data.append(go.Scatter3d(x=waypoints_world[i:i+2, 0], y=waypoints_world[i:i+2, 1], z=waypoints_world[i:i+2, 2], mode='lines', name='path', line=dict(width=10, color='orange')))
+        if planner_info is not None:
+            # plot costmap
+            if 'costmap' in planner_info:
+                costmap = planner_info['costmap'][::self.downsample_ratio, ::self.downsample_ratio, ::self.downsample_ratio]
+                skip_ratio = (self.workspace_bounds_max - self.workspace_bounds_min) / (self.map_size / self.downsample_ratio)
+                x, y, z = np.mgrid[self.workspace_bounds_min[0]:self.workspace_bounds_max[0]:skip_ratio[0],
+                                self.workspace_bounds_min[1]:self.workspace_bounds_max[1]:skip_ratio[1],
+                                self.workspace_bounds_min[2]:self.workspace_bounds_max[2]:skip_ratio[2]]
+                grid_shape = costmap.shape
+                x = x[:grid_shape[0], :grid_shape[1], :grid_shape[2]]
+                y = y[:grid_shape[0], :grid_shape[1], :grid_shape[2]]
+                z = z[:grid_shape[0], :grid_shape[1], :grid_shape[2]]
+                fig_data.append(go.Volume(x=x.flatten(), y=y.flatten(), z=z.flatten(), value=costmap.flatten(), isomin=0, isomax=1, opacity=self.costmap_opacity, surface_count=self.costmap_surface_count, colorscale='Jet', showlegend=True, showscale=False))
+            # plot start position
+            # if 'start_pos' in planner_info:
+            #     fig_data.append(go.Scatter3d(x=[start_pos_world[0]], y=[start_pos_world[1]], z=[start_pos_world[2]], mode='markers', name='start', marker=dict(size=6, color='blue')))
+            # # plot target as dots extracted from target_map
+            # if 'raw_target_map' in planner_info:
+            #     targets_world = info['targets_world']
+            #     fig_data.append(go.Scatter3d(x=targets_world[:, 0], y=targets_world[:, 1], z=targets_world[:, 2], mode='markers', name='target', marker=dict(size=6, color='green', opacity=0.7)))
+
+        # visualize scene points
+        if self.scene_points is None:
+            print('no scene points to overlay, skipping...')
+            scene_points = None
+        else:
+            scene_points, scene_point_colors = self.scene_points
+            # resample to reduce the number of points
+            if scene_points.shape[0] > self.max_scene_points:
+                resample_idx = np.random.choice(scene_points.shape[0], min(scene_points.shape[0], self.max_scene_points), replace=False)
+                scene_points = scene_points[resample_idx]
+                if scene_point_colors is not None:
+                    scene_point_colors = scene_point_colors[resample_idx]
+            if scene_point_colors is None:
+                scene_point_colors = scene_points[:, 2]
+            else:
+                scene_point_colors = scene_point_colors / 255.0
+            # add scene points
+            fig_data.append(go.Scatter3d(x=scene_points[:, 0], y=scene_points[:, 1], z=scene_points[:, 2],
+                                        mode='markers', marker=dict(size=3, color=scene_point_colors, opacity=1.0)))
+        
+        fig = go.Figure(data=fig_data)
+ 
+        # set bounds and ratio
+        fig.update_layout(scene=dict(xaxis=dict(range=[self.plot_bounds_min[0], self.plot_bounds_max[0]], autorange=False),
+                                    yaxis=dict(range=[self.plot_bounds_min[1], self.plot_bounds_max[1]], autorange=False),
+                                    zaxis=dict(range=[self.plot_bounds_min[2], self.plot_bounds_max[2]], autorange=False)),
+                        scene_aspectmode='manual',
+                        scene_aspectratio=dict(x=self.scene_scale[0], y=self.scene_scale[1], z=self.scene_scale[2]))
+
+        # do not show grid and axes
+        fig.update_layout(scene=dict(xaxis=dict(showgrid=False, showticklabels=False, title='', visible=False),
+                                    yaxis=dict(showgrid=False, showticklabels=False, title='', visible=False),
+                                    zaxis=dict(showgrid=False, showticklabels=False, title='', visible=False)))
+
+        # set background color as white
+        fig.update_layout(template='none')
+
+        # save and show
+        if save and self.save_dir is not None:
+            curr_time = datetime.datetime.now()
+            log_id = f'{self.scene_idx:04}_{curr_time.hour}:{curr_time.minute}:{curr_time.second}'
+            save_path = os.path.join(self.save_dir, log_id + '_nowaypoints.html')
+            latest_save_path = os.path.join(self.save_dir, 'latest_nowaypoints..html')
+            print('** saving no waypoints visualization to', save_path, '...')
+            fig.write_html(save_path)
+            print('** saving no waypoints visualization to', latest_save_path, '...')
+            fig.write_html(latest_save_path)
+            print(f'** save to {save_path}')
+        if show:
+            fig.show()
+
+        return fig
+
+    def visualize_affordance(self, info, show=False, save=True):
+        """visualize the path and relevant info using plotly"""
+        affordance_map = info['planner_info']['target_map']
+        waypoints_world = np.array([p[0] for p in info['traj_world']])
+        start_pos_world = info['start_pos_world']
+        assert len(start_pos_world.shape) == 1
+        waypoints_world = np.concatenate([start_pos_world[None, ...], waypoints_world], axis=0)
+        
+        fig_data = []
+        # plot path
+        # add marker to path waypoints
+        # fig_data.append(go.Scatter3d(x=waypoints_world[:, 0], y=waypoints_world[:, 1], z=waypoints_world[:, 2], mode='markers', name='waypoints', marker=dict(size=4, color='red')))
+        # # add lines between waypoints
+        # for i in range(waypoints_world.shape[0] - 1):
+        #     fig_data.append(go.Scatter3d(x=waypoints_world[i:i+2, 0], y=waypoints_world[i:i+2, 1], z=waypoints_world[i:i+2, 2], mode='lines', name='path', line=dict(width=10, color='orange')))
+        if affordance_map is not None:
+            # plot costmap
+            costmap = affordance_map[::self.downsample_ratio, ::self.downsample_ratio, ::self.downsample_ratio]
+            skip_ratio = (self.workspace_bounds_max - self.workspace_bounds_min) / (self.map_size / self.downsample_ratio)
+            x, y, z = np.mgrid[self.workspace_bounds_min[0]:self.workspace_bounds_max[0]:skip_ratio[0],
+                            self.workspace_bounds_min[1]:self.workspace_bounds_max[1]:skip_ratio[1],
+                            self.workspace_bounds_min[2]:self.workspace_bounds_max[2]:skip_ratio[2]]
+            grid_shape = costmap.shape
+            x = x[:grid_shape[0], :grid_shape[1], :grid_shape[2]]
+            y = y[:grid_shape[0], :grid_shape[1], :grid_shape[2]]
+            z = z[:grid_shape[0], :grid_shape[1], :grid_shape[2]]
+            fig_data.append(go.Volume(x=x.flatten(), y=y.flatten(), z=z.flatten(), value=costmap.flatten(), isomin=0, isomax=1, opacity=self.costmap_opacity, surface_count=self.costmap_surface_count, colorscale='Jet', showlegend=True, showscale=False))
+            # # plot start position
+            # if 'start_pos' in planner_info:
+            #     fig_data.append(go.Scatter3d(x=[start_pos_world[0]], y=[start_pos_world[1]], z=[start_pos_world[2]], mode='markers', name='start', marker=dict(size=6, color='blue')))
+            # # plot target as dots extracted from target_map
+            # if 'raw_target_map' in planner_info:
+            #     targets_world = info['targets_world']
+            #     fig_data.append(go.Scatter3d(x=targets_world[:, 0], y=targets_world[:, 1], z=targets_world[:, 2], mode='markers', name='target', marker=dict(size=6, color='green', opacity=0.7)))
+
+        # visualize scene points
+        if self.scene_points is None:
+            print('no scene points to overlay, skipping...')
+            scene_points = None
+        else:
+            scene_points = None
+            scene_points, scene_point_colors = self.scene_points
+            # resample to reduce the number of points
+            if scene_points.shape[0] > self.max_scene_points:
+                resample_idx = np.random.choice(scene_points.shape[0], min(scene_points.shape[0], self.max_scene_points), replace=False)
+                scene_points = scene_points[resample_idx]
+                if scene_point_colors is not None:
+                    scene_point_colors = scene_point_colors[resample_idx]
+            if scene_point_colors is None:
+                scene_point_colors = scene_points[:, 2]
+            else:
+                scene_point_colors = scene_point_colors / 255.0
+            # add scene points
+            fig_data.append(go.Scatter3d(x=scene_points[:, 0], y=scene_points[:, 1], z=scene_points[:, 2],
+                                        mode='markers', marker=dict(size=3, color=scene_point_colors, opacity=1.0)))
+        
+        fig = go.Figure(data=fig_data)
+ 
+        # set bounds and ratio
+        fig.update_layout(scene=dict(xaxis=dict(range=[self.plot_bounds_min[0], self.plot_bounds_max[0]], autorange=False),
+                                    yaxis=dict(range=[self.plot_bounds_min[1], self.plot_bounds_max[1]], autorange=False),
+                                    zaxis=dict(range=[self.plot_bounds_min[2], self.plot_bounds_max[2]], autorange=False)),
+                        scene_aspectmode='manual',
+                        scene_aspectratio=dict(x=self.scene_scale[0], y=self.scene_scale[1], z=self.scene_scale[2]))
+
+        # do not show grid and axes
+        fig.update_layout(scene=dict(xaxis=dict(showgrid=False, showticklabels=False, title='', visible=False),
+                                    yaxis=dict(showgrid=False, showticklabels=False, title='', visible=False),
+                                    zaxis=dict(showgrid=False, showticklabels=False, title='', visible=False)))
+
+        # set background color as white
+        fig.update_layout(template='none')
+
+        # save and show
+        if save and self.save_dir is not None:
+            curr_time = datetime.datetime.now()
+            log_id = f'{self.scene_idx:04}_{curr_time.hour}:{curr_time.minute}:{curr_time.second}'
+            save_path = os.path.join(self.save_dir, log_id + '_affordance.html')
+            latest_save_path = os.path.join(self.save_dir, 'latest_affordance.html')
+            print('** saving affordance visualization to', save_path, '...')
+            fig.write_html(save_path)
+            print('** saving affordance visualization to', latest_save_path, '...')
+            fig.write_html(latest_save_path)
+            print(f'** save to {save_path}')
+        if show:
+            fig.show()
+
+        return fig
+
+
+    def visualize_avoidance(self, info, show=False, save=True):
+        """visualize the path and relevant info using plotly"""
+        avoidance_map = info['planner_info']['obstacle_map']
+        waypoints_world = np.array([p[0] for p in info['traj_world']])
+        start_pos_world = info['start_pos_world']
+        assert len(start_pos_world.shape) == 1
+        waypoints_world = np.concatenate([start_pos_world[None, ...], waypoints_world], axis=0)
+        
+        fig_data = []
+        # plot path
+        # add marker to path waypoints
+        # fig_data.append(go.Scatter3d(x=waypoints_world[:, 0], y=waypoints_world[:, 1], z=waypoints_world[:, 2], mode='markers', name='waypoints', marker=dict(size=4, color='red')))
+        # # add lines between waypoints
+        # for i in range(waypoints_world.shape[0] - 1):
+        #     fig_data.append(go.Scatter3d(x=waypoints_world[i:i+2, 0], y=waypoints_world[i:i+2, 1], z=waypoints_world[i:i+2, 2], mode='lines', name='path', line=dict(width=10, color='orange')))
+        if avoidance_map is not None:
+            # plot costmap
+            costmap = avoidance_map[::self.downsample_ratio, ::self.downsample_ratio, ::self.downsample_ratio]
+            skip_ratio = (self.workspace_bounds_max - self.workspace_bounds_min) / (self.map_size / self.downsample_ratio)
+            x, y, z = np.mgrid[self.workspace_bounds_min[0]:self.workspace_bounds_max[0]:skip_ratio[0],
+                            self.workspace_bounds_min[1]:self.workspace_bounds_max[1]:skip_ratio[1],
+                            self.workspace_bounds_min[2]:self.workspace_bounds_max[2]:skip_ratio[2]]
+            grid_shape = costmap.shape
+            x = x[:grid_shape[0], :grid_shape[1], :grid_shape[2]]
+            y = y[:grid_shape[0], :grid_shape[1], :grid_shape[2]]
+            z = z[:grid_shape[0], :grid_shape[1], :grid_shape[2]]
+            fig_data.append(go.Volume(x=x.flatten(), y=y.flatten(), z=z.flatten(), value=costmap.flatten(), isomin=0, isomax=1, opacity=self.costmap_opacity, surface_count=self.costmap_surface_count, colorscale='Jet', showlegend=True, showscale=False))
+            # # plot start position
+            # if 'start_pos' in planner_info:
+            #     fig_data.append(go.Scatter3d(x=[start_pos_world[0]], y=[start_pos_world[1]], z=[start_pos_world[2]], mode='markers', name='start', marker=dict(size=6, color='blue')))
+            # # plot target as dots extracted from target_map
+            # if 'raw_target_map' in planner_info:
+            #     targets_world = info['targets_world']
+            #     fig_data.append(go.Scatter3d(x=targets_world[:, 0], y=targets_world[:, 1], z=targets_world[:, 2], mode='markers', name='target', marker=dict(size=6, color='green', opacity=0.7)))
+
+        # visualize scene points
+        if self.scene_points is None:
+            print('no scene points to overlay, skipping...')
+            scene_points = None
+        else:
+            scene_points = None
+            scene_points, scene_point_colors = self.scene_points
+            # resample to reduce the number of points
+            if scene_points.shape[0] > self.max_scene_points:
+                resample_idx = np.random.choice(scene_points.shape[0], min(scene_points.shape[0], self.max_scene_points), replace=False)
+                scene_points = scene_points[resample_idx]
+                if scene_point_colors is not None:
+                    scene_point_colors = scene_point_colors[resample_idx]
+            if scene_point_colors is None:
+                scene_point_colors = scene_points[:, 2]
+            else:
+                scene_point_colors = scene_point_colors / 255.0
+            # add scene points
+            fig_data.append(go.Scatter3d(x=scene_points[:, 0], y=scene_points[:, 1], z=scene_points[:, 2],
+                                        mode='markers', marker=dict(size=3, color=scene_point_colors, opacity=1.0)))
+        
+        fig = go.Figure(data=fig_data)
+ 
+        # set bounds and ratio
+        fig.update_layout(scene=dict(xaxis=dict(range=[self.plot_bounds_min[0], self.plot_bounds_max[0]], autorange=False),
+                                    yaxis=dict(range=[self.plot_bounds_min[1], self.plot_bounds_max[1]], autorange=False),
+                                    zaxis=dict(range=[self.plot_bounds_min[2], self.plot_bounds_max[2]], autorange=False)),
+                        scene_aspectmode='manual',
+                        scene_aspectratio=dict(x=self.scene_scale[0], y=self.scene_scale[1], z=self.scene_scale[2]))
+
+        # do not show grid and axes
+        fig.update_layout(scene=dict(xaxis=dict(showgrid=False, showticklabels=False, title='', visible=False),
+                                    yaxis=dict(showgrid=False, showticklabels=False, title='', visible=False),
+                                    zaxis=dict(showgrid=False, showticklabels=False, title='', visible=False)))
+
+        # set background color as white
+        fig.update_layout(template='none')
+
+        # save and show
+        if save and self.save_dir is not None:
+            curr_time = datetime.datetime.now()
+            log_id = f'{self.scene_idx:04}_{curr_time.hour}:{curr_time.minute}:{curr_time.second}'
+            save_path = os.path.join(self.save_dir, log_id + '_avoidance.html')
+            latest_save_path = os.path.join(self.save_dir, 'latest_avoidance.html')
+            print('** saving avoidance visualization to', save_path, '...')
+            fig.write_html(save_path)
+            print('** saving avoidance visualization to', latest_save_path, '...')
             fig.write_html(latest_save_path)
             print(f'** save to {save_path}')
         if show:

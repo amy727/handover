@@ -33,6 +33,12 @@ composer("grasp the charger")
 composer("back to default pose")
 # done
 
+objects = ['ycb_01', 'ycb_02', 'panda', 'hand', 'table']
+# Query: Grasp the ycb_01 and avoid the hand and table.
+composer("grasp the ycb_01 while keeping at least 10cm away from the hand and table")
+composer("back to default pose")
+# done
+
 objects = ['grape', 'lemon', 'drill', 'router', 'bread', 'tray']
 # Query: put the sweeter fruit in the tray that contains the bread.
 composer("grasp the grape")

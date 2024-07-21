@@ -12,6 +12,8 @@ from pygments.formatters import TerminalFormatter
 from voxposer.utils import load_prompt, DynamicObservation, IterableDynamicObservation
 import time
 from voxposer.LLM_cache import DiskCache
+import numpy as np
+from voxposer.interfaces import *
 
 class LMP:
     """Language Model Program (LMP), adopted from Code as Policies."""

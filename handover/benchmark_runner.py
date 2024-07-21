@@ -40,21 +40,20 @@ class BenchmarkRunner:
         self._env = HandoverBenchmarkWrapper(gym.make(self._cfg.ENV.ID, cfg=self._cfg))
         # print("YCB OBJECT:",self._env.ycb)
 
+        # Hardcode workspace bounds for now
+        self.workspace_bounds_min = np.array([-0.5,-0.5,0.5])
+        self.workspace_bounds_max = np.array([1.5,1,2.5])
+        self._env.set_workspace_bounds(self.workspace_bounds_min, self.workspace_bounds_max)
+
+        # Added to incorporate with polymetis if needed
         self.sim_client = sim_client
         self.robot = robot
         self.gripper = gripper
 
+        # Setup voxposer environment
         self.config = get_config('handover')
         self.lmps, self.lmp_env = setup_LMP(self._env, self.config, debug=False)
         self.voxposer_ui = self.lmps['plan_ui']
-
-        # Hardcode workspace bounds for now
-        self.workspace_bounds_min = np.array([-5,-5,-5])
-        self.workspace_bounds_max = np.array([10,10,10])
-        self.workspace_bounds_min = np.array([-2,-2,-2])
-        self.workspace_bounds_max = np.array([5,5,5])
-        # self._env.workspace_bounds_min = self.workspace_bounds_min
-        # self._env.workspace_bounds_max =self.workspace_bounds_max
 
         # Setup visualizer and add it to the simulation env
         self.visualizer = ValueMapVisualizer(self.config['visualizer'])
@@ -87,12 +86,6 @@ class BenchmarkRunner:
 
             dt = datetime.now()
             dt = dt.strftime("%Y-%m-%d_%H-%M-%S")
-            # res_dir = os.path.join(
-            #     self._cfg.BENCHMARK.RESULT_DIR,
-            #     "{}_{}_{}_{}".format(
-            #         dt, policy.name, self._cfg.BENCHMARK.SETUP, self._cfg.BENCHMARK.SPLIT
-            #     ),
-            # )
             res_dir = os.path.join(
                 self._cfg.BENCHMARK.RESULT_DIR,
                 "{}_{}_{}_{}".format(
@@ -147,19 +140,41 @@ class BenchmarkRunner:
                 res_file = os.path.join(res_dir, "{:03d}.npz".format(idx))
                 np.savez_compressed(res_file, **result)
 
-    def _set_waypoints(self, policy):
-        # Set the visualizer
-        self._env.visualizer.update_scene_points(*self._env.get_scene_3d_obs())
-
+    def _set_waypoints(self, policy, idx):
+        """
+        Interfaces with voxposer to get the waypoints
+        """
         # VOXPOSER INSTRUCTION
-        instruction = f"Pick up the {self._env.ycb_name} and avoid the hand and table with no collisions."
-        self.voxposer_ui(instruction)
-        traj_world = self._env.execute_info[0]['traj_world']
+        # instruction = f"Grasp the {self._env.ycb_name}, staying close to it while avoiding the hand and table with no collisions"
+        # instruction = f"Move 5cm in front of {self._env.ycb_name} and avoid the hand and table and no collisions"
+        # instruction = f"Face the {self._env.ycb_name} and grasp {self._env.ycb_name} and avoid the hand and table and no collisions"
+        # instruction = f"Move 1cm in front of {self._env.ycb_name} and avoid the hand and table and no collisions"
+        # instruction = f"Pick up the {self._env.ycb_name} and avoid the hand and table with no collisions."
+        instruction = f"Grasp {self._env.ycb_name} and avoid the hand and table and no collisions"
 
+        # Set the voxposer visualizer and run voxposer
+        self._env.visualizer.update_scene_points(idx, *self._env.get_scene_3d_obs())
+        self.voxposer_ui(instruction, obj_name=self._env.ycb_name)
+
+        # NOTE: If you have a set voxposer instruction that always executes the same way,
+        # you can comment out the top two lines, set up that procedure in the self.lmp_env.call() method
+        # and uncomment the line below.
+        # self.lmp_env.call(instruction, obj_name=self._env.ycb_name, hand_name=self._env.hand_name)
+        
+        # Get the waypoints
+        traj_world = self._env.execute_info[0]['traj_world']
         waypoints = [np.concatenate([waypoint[0], waypoint[1]]) for waypoint in traj_world]
+
+        # Determining the minimum distance between the waypoint and the hand
+        if self._env.hand_name != "subject":
+            object_points = self._env.get_obj_points(self._env.hand_name)
+            for waypoint in waypoints[-1:-5:-1]:
+                min_dist = self._env.calculate_distances(waypoint[:3], object_points)
+                print("MIN DIST:", min_dist)
+
         policy.set_waypoints(waypoints)
-        print("========== WAYPOINTS ===========")
-        print(policy._waypoints)
+        # print("========== WAYPOINTS ===========")
+        # print(policy._waypoints)
 
     @timer
     def _run_scene(self, idx, policy, render_dir=None):
@@ -170,17 +185,18 @@ class BenchmarkRunner:
         result["action"] = []
         result["elapsed_time"] = []
 
-        self._env.set_camera(self._env.env.env.simulator._view_matrix, 
+        # Set view and projection matrices for all cameras
+        self._env.set_camera_matrices(self._env.env.env.simulator._view_matrix, 
             self._env.env.env.simulator._projection_matrix)
-        self._env.set_up_objects()
-        set_lmp_objects(self.lmps, self._env.get_object_names())  # set the object names to be used by voxposer
 
         if self._cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER:
             self._render_offscreen_and_save(render_dir)
 
         while True:
             if obs["frame"] == policy._steps_wait:
-                self._set_waypoints(policy)
+                self._env.set_up_objects() 
+                set_lmp_objects(self.lmps, self._env.get_object_names())  # set the object names to be used by voxposer
+                self._set_waypoints(policy, idx)
 
             (action, info), elapsed_time = self._run_policy(policy, obs)
 
@@ -237,27 +253,24 @@ class BenchmarkRunner:
                 f.write(line + "\n")
 
     def _render_offscreen_and_save(self, render_dir):
+        #==== Uncomment if you want to hardcode render_dir ====#
         # render_dir = "/home/chenam14/ws/handover-sim/results/thesis3"
-        # print("RENDER_DIR", render_dir)
+        
         data = self._env.render_offscreen()
         
+        # Save camera image file
         img_render_file = os.path.join(render_dir, "{:06d}_img.jpg".format(self._env.frame))
-        # print("img_render_file:", img_render_file)
         cv2.imwrite(img_render_file, data["color"][:, :, [2, 1, 0, 3]])
 
+        #==== Uncomment to save depth image file ====#
         # depth_render_file = os.path.join(render_dir, "{:06d}_depth.png".format(self._env.frame))
         # normalized_depth = cv2.normalize(data["depth"], None, 0, 255, cv2.NORM_MINMAX)
         # depth_image = np.uint8(normalized_depth)
         # cv2.imwrite(depth_render_file, depth_image)
 
+        #==== Uncomment to save segmentation mask image file ====#
         # seg_render_file = os.path.join(render_dir, "{:06d}_seg.jpg".format(self._env.frame))
         # cv2.imwrite(seg_render_file, data["segmentation"])
-        
-        # pc_render_file = os.path.join(render_dir, "{:06d}_pc.ply".format(self._env.frame))
-        # self._save_pointcloud_as_ply(pc_render_file, data["pc"][0], data["pc"][1])
-
-        # pc_render_file2 = os.path.join(render_dir, "{:06d}_pc_obj.ply".format(self._env.frame))
-        # self._save_pointcloud_as_ply(pc_render_file2, data["pc_obj"][0])
 
     @timer
     def _run_policy(self, policy, obs):

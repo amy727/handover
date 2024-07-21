@@ -104,6 +104,13 @@ movable = parse_query_obj('gripper')
 rotation_map = get_rotation_map('turn counter-clockwise by 180 degrees')
 execute(movable, rotation_map=rotation_map)
 
+# Query: grasp the ycb_01 while keeping at least 10cm away from the hand and table.
+movable = parse_query_obj('gripper')
+affordance_map = get_affordance_map('a point at the center of ycb_01')
+avoidance_map = get_avoidance_map('10cm from the hand and table')
+gripper_map = get_gripper_map('open everywhere except 1cm around ycb_01')
+execute(movable, affordance_map=affordance_map, avoidance_map=avoidance_map, rotation_map=rotation_map, gripper_map=gripper_map)
+
 # Query: sweep all particles to the left side of the table.
 particles = parse_query_obj('particles')
 for particle in particles:
