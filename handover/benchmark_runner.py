@@ -9,6 +9,8 @@ import time
 import cv2
 import numpy as np
 import torch
+import random
+import pybullet as p
 
 from datetime import datetime
 
@@ -99,7 +101,9 @@ class BenchmarkRunner:
                 self._cfg.dump(stream=f, default_flow_style=None)
 
         if index is None:
-            indices = range(self._env.num_scenes)
+            indices = list(range(self._env.num_scenes))
+            # Randomly shuffle the indices
+            # random.shuffle(indices)
         else:
             indices = [index]
 
@@ -150,16 +154,25 @@ class BenchmarkRunner:
         # instruction = f"Face the {self._env.ycb_name} and grasp {self._env.ycb_name} and avoid the hand and table and no collisions"
         # instruction = f"Move 1cm in front of {self._env.ycb_name} and avoid the hand and table and no collisions"
         # instruction = f"Pick up the {self._env.ycb_name} and avoid the hand and table with no collisions."
-        instruction = f"Grasp {self._env.ycb_name} and avoid the hand and table and no collisions"
+        # instruction = f"Grasp {self._env.ycb_name} and avoid the hand and table and no collisions"
+        instruction = f"Pick up the {self._env.ycb_name} while avoiding the hand and table with no collisions"
+        print("INSTRUCTION:", instruction)
+        # instruction = f"Grasp the {self._env.ycb_name} by first facing it while avoiding the hand and table with no collisions"
 
+        # Get pcl
+        points, colors = self._env.get_scene_3d_obs()
+        self._save_pointcloud_as_ply(
+            "/scratch/local/2024/karthikm/handover/examples/pointcloud.ply", points, colors
+        )
+        
+        self._env.visualizer.update_scene_points(idx, points, colors)
         # Set the voxposer visualizer and run voxposer
-        self._env.visualizer.update_scene_points(idx, *self._env.get_scene_3d_obs())
         self.voxposer_ui(instruction, obj_name=self._env.ycb_name)
 
         # NOTE: If you have a set voxposer instruction that always executes the same way,
         # you can comment out the top two lines, set up that procedure in the self.lmp_env.call() method
         # and uncomment the line below.
-        # self.lmp_env.call(instruction, obj_name=self._env.ycb_name, hand_name=self._env.hand_name)
+        #self.lmp_env.call(instruction, obj_name=self._env.ycb_name, hand_name=self._env.hand_name)
         
         # Get the waypoints
         traj_world = self._env.execute_info[0]['traj_world']

@@ -50,6 +50,7 @@ class HandoverEnv(easysim.SimulatorEnv):
         self.name2ids = {}
         self.ycb_name = "ycb"
         self.hand_name = "subject"
+        self.ycb_real_name = ""
         for name, obj in self.scene._name_to_body.items():
             self.name2ids[name] = self.scene._bodies.index(obj) + 1
             print(name, obj, self.scene.ycb_obj)
@@ -373,6 +374,7 @@ class HandoverEnv(easysim.SimulatorEnv):
 
     def get_ee_quat(self):
         return self.get_ee_pose()[3:7]
+    
 
     def set_camera_matrices(self, view_matrix, projection_matrix):
         """
@@ -380,6 +382,9 @@ class HandoverEnv(easysim.SimulatorEnv):
         If there are multiple cameras, it would be a dictionary with the camera name as the key
         and the view/projection matrix as the value.
         """
+        print("VIEW MATRICES", view_matrix)
+        print("PROJ MATRICES", projection_matrix)
+        
         self.view_matrix = view_matrix
         self.proj_matrix = projection_matrix
 
@@ -387,47 +392,103 @@ class HandoverEnv(easysim.SimulatorEnv):
         # print("PROJ MATRICES", self.proj_matrix)
 
     def get_point_cloud(self, camera, depth_frame, color_frame=None, seg_frame=None):
-        """Generates a point cloud from depth, color, and segmentation frames."""
         view_matrix = np.array(self.view_matrix[camera.name]).reshape([4, 4], order="F")
         proj_matrix = np.array(self.proj_matrix[camera.name]).reshape([4, 4], order="F")
         tran_pix_world = np.linalg.inv(np.matmul(proj_matrix, view_matrix))
 
         if depth_frame is not None:
+            depth_frame = self.meters_to_normalized_depth(depth_frame, camera.near, camera.far)
             depth_frame = np.array(depth_frame, copy=True)
             height, width = depth_frame.shape
-            # print("Depth shape:", width, height)
 
-            # create a grid with pixel coordinates and depth values
+            # Create pixel grid
             y, x = np.mgrid[-1 : 1 : 2 / height, -1 : 1 : 2 / width]
             y *= -1.0
-            x, y, z = x.reshape(-1), y.reshape(-1), depth_frame.reshape(-1)
+            x = x.reshape(-1)
+            y = y.reshape(-1)
+            z = depth_frame.reshape(-1)
             h = np.ones_like(z)
 
-            pixels = np.stack([x, y, z, h], axis=1)
-            # filter out "infinite" depths
-            # pixels = pixels[z < 0.99]
-            pixels[:, 2] = 2 * pixels[:, 2] - 1
+            # Filter out invalid z (set to -1.0 earlier)
+            valid = (z >= 0.0) & (z < 0.99)
+            x, y, z, h = x[valid], y[valid], z[valid], h[valid]
 
-            # turn pixels to world coordinates
+            # Map normalized z from [0,1] to [-1,1] clip space
+            z = 2.0 * z - 1.0
+
+            pixels = np.stack([x, y, z, h], axis=1)
+
+            # Unproject
             points = np.matmul(tran_pix_world, pixels.T).T
             points /= points[:, 3:4]
             points = points[:, :3]
 
-            # Add colors to the point cloud
+            # Optional: color + seg
             colors = None
             if color_frame is not None:
-                colors = color_frame[:, :, :3].reshape(-1, 3)
-                # print(f"Color shape: {colors.shape}")
+                color_frame = color_frame[:, :, :3].reshape(-1, 3)
+                colors = color_frame[valid]
 
             seg = None
             if seg_frame is not None:
-                seg = seg_frame.reshape(-1)
-                # print(f"Mask shape: {seg.shape}")
+                seg_frame = seg_frame.reshape(-1)
+                seg = seg_frame[valid]
 
-            # print(f"Points shape: {points.shape}")
             return points, colors, seg
 
+    # def get_point_cloud(self, camera, depth_frame, color_frame=None, seg_frame=None):
+    #     """Generates a point cloud from depth, color, and segmentation frames."""
+    #     view_matrix = np.array(self.view_matrix[camera.name]).reshape([4, 4], order="F")
+    #     proj_matrix = np.array(self.proj_matrix[camera.name]).reshape([4, 4], order="F")
+    #     tran_pix_world = np.linalg.inv(np.matmul(proj_matrix, view_matrix))
 
+    #     if depth_frame is not None:
+    #         depth_frame = np.array(depth_frame, copy=True)
+    #         height, width = depth_frame.shape
+    #         # print("Depth shape:", width, height)
+
+    #         # create a grid with pixel coordinates and depth values
+    #         y, x = np.mgrid[-1 : 1 : 2 / height, -1 : 1 : 2 / width]
+    #         y *= -1.0
+    #         x, y, z = x.reshape(-1), y.reshape(-1), depth_frame.reshape(-1)
+    #         h = np.ones_like(z)
+
+    #         pixels = np.stack([x, y, z, h], axis=1)
+    #         # filter out "infinite" depths
+    #         # pixels = pixels[z < 0.99]
+    #         pixels[:, 2] = 2 * pixels[:, 2] - 1
+
+    #         # turn pixels to world coordinates
+    #         points = np.matmul(tran_pix_world, pixels.T).T
+    #         points /= points[:, 3:4]
+    #         points = points[:, :3]
+
+    #         # Add colors to the point cloud
+    #         colors = None
+    #         if color_frame is not None:
+    #             colors = color_frame[:, :, :3].reshape(-1, 3)
+    #             # print(f"Color shape: {colors.shape}")
+
+    #         seg = None
+    #         if seg_frame is not None:
+    #             seg = seg_frame.reshape(-1)
+    #             # print(f"Mask shape: {seg.shape}")
+
+    #         # print(f"Points shape: {points.shape}")
+    #         return points, colors, seg
+    
+    def meters_to_normalized_depth(self, depth_meters, near=0.1, far=1.1):
+        depth_meters = np.copy(depth_meters)
+        invalid_mask = (depth_meters <= 1e-3) | np.isnan(depth_meters)
+        depth_meters[invalid_mask] = np.nan
+
+        z_n = (2.0 * near * far / depth_meters - (far + near)) / (far - near)
+        z_norm = 0.5 * (-z_n + 1.0)
+
+        # Return NaNs clearly so they can be removed
+        return z_norm
+
+        
     def get_3d_obs_by_name(self, query_name):
         """
         Retrieves 3D point cloud observations and normals of an object by its name.
@@ -449,6 +510,8 @@ class HandoverEnv(easysim.SimulatorEnv):
         points, masks, normals = [], [], []
         for cam in self.scene._cameras:
             depth = cam.depth[0].numpy()
+            #depth = self.meters_to_normalized_depth(depth, cam.near, cam.far)
+
             seg = cam.segmentation[0].numpy()
 
             # Generate point cloud
@@ -505,6 +568,8 @@ class HandoverEnv(easysim.SimulatorEnv):
         points, masks = [], []
         for cam in self.scene._cameras:
             depth = cam.depth[0].numpy()
+            #depth = self.meters_to_normalized_depth(depth, cam.near, cam.far)
+
             seg = cam.segmentation[0].numpy()
 
             # Generate point cloud
@@ -569,6 +634,7 @@ class HandoverEnv(easysim.SimulatorEnv):
         for cam in self.scene._cameras:
             color = cam.color[0].numpy()
             depth = cam.depth[0].numpy()
+            #depth = self.meters_to_normalized_depth(depth, cam.near, cam.far)
             seg = cam.segmentation[0].numpy()
 
             pc, c, s = self.get_point_cloud(cam, depth, color, seg)
@@ -579,7 +645,7 @@ class HandoverEnv(easysim.SimulatorEnv):
         colors = np.concatenate(colors, axis=0)
         masks = np.concatenate(masks, axis=0)
 
-        # only keep points within workspace
+        # # only keep points within workspace
         chosen_idx_x = (points[:, 0] > self.workspace_bounds_min[0]) & (points[:, 0] < self.workspace_bounds_max[0])
         chosen_idx_y = (points[:, 1] > self.workspace_bounds_min[1]) & (points[:, 1] < self.workspace_bounds_max[1])
         chosen_idx_z = (points[:, 2] > self.workspace_bounds_min[2]) & (points[:, 2] < self.workspace_bounds_max[2])
