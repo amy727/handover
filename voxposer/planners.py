@@ -2,6 +2,7 @@
 import numpy as np
 from scipy.ndimage import gaussian_filter
 from scipy.ndimage import distance_transform_edt
+from scipy.ndimage import binary_dilation
 from scipy.signal import savgol_filter
 from voxposer.utils import get_clock_time, normalize_map, calc_curvature
 
@@ -157,7 +158,16 @@ class PathPlanner:
             # for object centric motion, we assume we can only push in the xy plane
             if object_centric:
                 closest_target[2] = last_waypoint[2]
-            path = np.append(path, [closest_target], axis=0)
+            
+            # path = np.append(path, [closest_target], axis=0)
+            dist = np.linalg.norm(closest_target - path[-1])
+            n_interp = int(dist // 1.0)  # 1.0 voxel per step
+            if n_interp > 0:
+                interp = np.linspace(path[-1], closest_target, n_interp + 2)[1:-1]
+                path = np.concatenate([path, interp, [closest_target]], axis=0)
+            else:
+                path = np.append(path, [closest_target], axis=0)
+            
         # space out path more if task is object centric (so that we can push faster)
         if object_centric:
             k = self.config['pushing_skip_per_k']
