@@ -101,7 +101,6 @@ class PandaTcp(Panda):
     def step(self, dof_target_position):
         self.body.dof_target_position = dof_target_position
 
-
 class PandaHandCamera(Panda):
     _URDF_FILE = os.path.join(
         os.path.dirname(__file__),
