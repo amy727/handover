@@ -7,7 +7,7 @@ import abc
 import numpy as np
 
 from handover.table import Table
-from handover.panda import Panda, PandaHandCamera
+from handover.panda import Panda, PandaHandCamera, PandaTcp
 from handover.dex_ycb import DexYCB
 from handover.ycb import YCB
 from handover.mano import MANO
@@ -36,7 +36,6 @@ class HandoverEnv(easysim.SimulatorEnv):
         if self.cfg.ENV.RENDER_OFFSCREEN:
             self._render_offscreen_init()
 
-
     def set_workspace_bounds(self, workspace_bounds_min, workspace_bounds_max):
         self.workspace_bounds_min = workspace_bounds_min
         self.workspace_bounds_max = workspace_bounds_max
@@ -50,7 +49,6 @@ class HandoverEnv(easysim.SimulatorEnv):
         self.name2ids = {}
         self.ycb_name = "ycb"
         self.hand_name = "subject"
-        self.ycb_real_name = ""
         for name, obj in self.scene._name_to_body.items():
             self.name2ids[name] = self.scene._bodies.index(obj) + 1
             print(name, obj, self.scene.ycb_obj)
@@ -365,8 +363,26 @@ class HandoverEnv(easysim.SimulatorEnv):
         return self.get_ee_pose()
 
     def get_ee_pose(self):
-        ee_pose = self.panda._body.link_state[0, self.panda.LINK_IND_HAND, :].numpy()
-        # print(f"ee link pose: {ee_pose}")
+        ############################# OLD
+        ee_pose = self.panda._body.link_state[0, 11, :].numpy()
+        
+        ############################# NEW
+
+        # Try to get middle of fingers
+        # LINK_IND_FINGERS = (9, 10)
+        # Get the link states of the fingers
+        # finger_states = self.panda._body.link_state[0, self.panda.LINK_IND_FINGERS, :].numpy()
+        # # Print both the finger states and the ee pose
+
+        # # Average the positions (0:3)
+        # avg_position = np.mean(finger_states[:, 0:3], axis=0)
+
+        # # Use the quaternion of one finger (e.g., the left finger, index 0)
+        # orientation_quat = finger_states[0, 3:7]
+
+        # # Combine position and quaternion
+        # ee_pose = np.concatenate([avg_position, orientation_quat])
+        
         return ee_pose
 
     def get_ee_pos(self):
@@ -382,14 +398,8 @@ class HandoverEnv(easysim.SimulatorEnv):
         If there are multiple cameras, it would be a dictionary with the camera name as the key
         and the view/projection matrix as the value.
         """
-        print("VIEW MATRICES", view_matrix)
-        print("PROJ MATRICES", projection_matrix)
-        
         self.view_matrix = view_matrix
         self.proj_matrix = projection_matrix
-
-        # print("VIEW MATRICES", self.view_matrix)
-        # print("PROJ MATRICES", self.proj_matrix)
 
     def get_point_cloud(self, camera, depth_frame, color_frame=None, seg_frame=None):
         view_matrix = np.array(self.view_matrix[camera.name]).reshape([4, 4], order="F")
@@ -692,7 +702,7 @@ class HandoverEnv(easysim.SimulatorEnv):
 
 class HandoverStateEnv(HandoverEnv):
     def _get_panda_cls(self):
-        return Panda
+        return PandaTcp
 
     def _get_observation(self):
         observation = {}

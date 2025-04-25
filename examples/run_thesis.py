@@ -219,7 +219,6 @@ def simple_extend(q1, q2, step_size=0.1):
         q3 += (dq / dist) * step_size
         return q3
 
-
 class ThesisPolicy:
     def __init__(self, cfg, bullet_manipulator=None, time_wait=time_wait, time_action_repeat=0.1, time_close_gripper=0.5):
         #======= Initializations copied from YangICRA2021Policy =======#
@@ -269,11 +268,41 @@ class ThesisPolicy:
         self._waypoints = None
         self._num_waypoints = 0
         self._current_waypoint_index = 0
+    
+    def transform_waypoints_to_hand(self, waypoints_grasptarget):
+        """
+        Transform waypoints from the panda_grasptarget frame to the panda_hand frame.
 
+        Args:
+            waypoints_grasptarget (np.ndarray): Waypoints in the panda_grasptarget frame, shape (N, 7),
+                                                where each waypoint is [x, y, z, qx, qy, qz, qw].
+
+        Returns:
+            np.ndarray: Transformed waypoints in the panda_hand frame, shape (N, 7).
+        """
+        # Define the translation offset from grasptarget to hand; the hand is higher than the grasptarget
+        translation = np.array([0, 0, 0.105])
+        
+        waypoints_hand = []
+        for waypoint in waypoints_grasptarget:
+            pos_grasptarget = waypoint[:3]
+            quat_grasptarget = waypoint[3:]
+            
+            # Transform the position
+            pos_hand = pos_grasptarget + translation
+
+            waypoint_hand = np.concatenate((pos_hand, quat_grasptarget))
+            waypoints_hand.append(waypoint_hand)
+
+        return waypoints_hand
+    
     def set_waypoints(self, waypoints):
+        print(waypoints)
         """Set the waypoints for the robot to follow."""
         waypoints = waypoints[:-2] # Don't move all the way to the last waypoint to avoid object collision
         self._waypoints = waypoints
+        # Transform waypoints from TCP to EE frame
+        self._waypoints = self.transform_waypoints_to_hand(waypoints)
         self._num_waypoints = len(waypoints)
         print(f"There are {self._num_waypoints} waypoints!")
         self._current_waypoint_index = 0
@@ -367,16 +396,15 @@ def main():
     # Handover config
     handover_cfg = get_config_from_args()
     handover_cfg.BENCHMARK.SETUP = "s0"
-    handover_cfg.SIM.RENDER = False
+    handover_cfg.SIM.RENDER = True
     handover_cfg.ENV.RENDER_OFFSCREEN = True
     handover_cfg.BENCHMARK.SAVE_RESULT = True 
-    handover_cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER = True
+    handover_cfg.BENCHMARK.SAVE_OFFSCREEN_RENDER = False
 
     policy = ThesisPolicy(handover_cfg)
 
     benchmark_runner = BenchmarkRunner(handover_cfg)
     benchmark_runner.run(policy)
     
-
 if __name__ == "__main__":
     main()

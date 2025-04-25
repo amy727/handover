@@ -142,6 +142,7 @@ class LMP_interface():
         if self._cfg['visualize']:
           assert self._env.visualizer is not None
           step_info['start_pos_world'] = self._voxel_to_world(start_pos)
+          print("start_pos_world:", step_info['start_pos_world'])
           step_info['targets_world'] = self._voxel_to_world(planner_info['targets_voxel'])
           self._env.visualizer.visualize(step_info)
           self._env.visualizer.visualize_nowaypoints(step_info)
@@ -182,7 +183,6 @@ class LMP_interface():
     return gripper_map
   
   def call(self, instruction, obj_name, hand_name):
-    
     print(f"Detecting {obj_name} and {hand_name}")
     gripper = DynamicObservation(lambda: self.detect('gripper'))
     ycb_obj = DynamicObservation(lambda: self.detect(obj_name))
@@ -197,6 +197,7 @@ class LMP_interface():
     gripper_map = lambda: self.get_gripper_map(ycb_obj)
 
     self.execute(gripper, affordance_map=affordance_map, avoidance_map=avoidance_map, gripper_map=gripper_map)
+    
   # ======================================================
 
   def cm2index(self, cm, direction):

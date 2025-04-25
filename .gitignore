@@ -70,3 +70,9 @@ handover/data/assets-3rd-party-20220511.tar.gz
 handover/data/assets
 handover/data/dex-ycb-cache-20220323.tar.gz
 handover/data/dex-ycb-cache
+
+# Pickle
+*.pkl
+
+# Html
+*.html

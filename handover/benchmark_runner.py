@@ -154,8 +154,7 @@ class BenchmarkRunner:
         # instruction = f"Face the {self._env.ycb_name} and grasp {self._env.ycb_name} and avoid the hand and table and no collisions"
         # instruction = f"Move 1cm in front of {self._env.ycb_name} and avoid the hand and table and no collisions"
         # instruction = f"Pick up the {self._env.ycb_name} and avoid the hand and table with no collisions."
-        # instruction = f"Grasp {self._env.ycb_name} and avoid the hand and table and no collisions"
-        instruction = f"Pick up the {self._env.ycb_name} while avoiding the hand and table with no collisions"
+        instruction = f"Grasp {self._env.ycb_name} and avoid the hand and table and no collisions"
         print("INSTRUCTION:", instruction)
         # instruction = f"Grasp the {self._env.ycb_name} by first facing it while avoiding the hand and table with no collisions"
 
@@ -172,7 +171,7 @@ class BenchmarkRunner:
         # NOTE: If you have a set voxposer instruction that always executes the same way,
         # you can comment out the top two lines, set up that procedure in the self.lmp_env.call() method
         # and uncomment the line below.
-        #self.lmp_env.call(instruction, obj_name=self._env.ycb_name, hand_name=self._env.hand_name)
+        # self.lmp_env.call(instruction, obj_name=self._env.ycb_name, hand_name=self._env.hand_name)
         
         # Get the waypoints
         traj_world = self._env.execute_info[0]['traj_world']
