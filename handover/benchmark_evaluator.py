@@ -48,18 +48,25 @@ def evaluate(res_dir):
     logger.info("Running evaluation for {}".format(res_dir))
 
     files = glob.glob(os.path.join(res_dir, "*.npz"))
+    
+    num_scenes = env.num_scenes
     if len(files) != env.num_scenes:
-        raise ValueError(
-            "Number of .npz files ({}) does not match the number of scenes ({})".format(
+        num_scenes = len(files)
+        logger.warning("Number of .npz files ({}) does not match the number of scenes ({})".format(
                 len(files), env.num_scenes
-            )
-        )
+            ))
+        #======= Uncomment if you want to raise error =======#
+        # raise ValueError(
+        #     "Number of .npz files ({}) does not match the number of scenes ({})".format(
+        #         len(files), env.num_scenes
+        #     )
+        # )
 
     result = []
     elapsed_frame = []
     elapsed_time = []
 
-    for idx in range(env.num_scenes):
+    for idx in range(num_scenes):
         res_file = os.path.join(res_dir, "{:03d}.npz".format(idx))
         res = np.load(res_file)
 
@@ -84,7 +91,7 @@ def evaluate(res_dir):
     mask_fail_3 = result & EpisodeStatus.FAILURE_TIMEOUT == EpisodeStatus.FAILURE_TIMEOUT
 
     result = {}
-    result["num_scenes"] = env.num_scenes
+    result["num_scenes"] = num_scenes
     result["num_success"] = np.sum(mask_succ)
     result["success_rate"] = np.mean(mask_succ)
     result["time_exec"] = np.mean(elapsed_frame[mask_succ]) * cfg.SIM.TIME_STEP

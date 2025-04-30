@@ -1,8 +1,60 @@
-# Handover
+# Thesis: Leveraging Large Language Models for Human to Robot Object Handovers
 
-Human-Robot handovers based on Handover-Sim.
+H2R handovers based on Handover-Sim and VoxPoser.
 
-# Handover-Sim
+## Environment Setup
+This repo combines both the [handover-sim](https://github.com/NVlabs/handover-sim) and [VoxPoser](https://github.com/huangwl18/VoxPoser) repos. Mainly you'll need to follow the `handover-sim` setup steps and just install some additional libraries required by `VoxPoser`. 
+
+Here is an overview of the steps:
+1. Follow the handover-sim [installation instructions](#installation) but instead of cloning their repo, clone this repo recursively with `git clone --recursive` 
+2. Install the additional VoxPoser dependencies found [here](https://github.com/huangwl18/VoxPoser/blob/main/requirements.txt). For visibility, they are: `jupyter`, `openai`, `plotly`, `transforms3d`, `open3d`.
+3. Add the location of your local repo to your python path, for example: `export PYTHONPATH=/home/chenam14/ws/handover-sim`
+4. Add your openai api key to your environment: `export OPENAI_API_KEY=<your_openai_key>`
+
+## Running the thesis pipeline
+Configure the parameters in the `main()` function in `examples/run_thesis.py` and then run the following in the terminal:
+
+```shell
+python examples/run_thesis.py
+```
+
+**There are also more parameters in these config files:**
+- `handover/config.py`: Main handover-sim config file
+- `voxposer/configs/handover_config.yaml`: Main VoxPoser config file
+
+**There are also some hardcoded values to be aware of:**
+- The workspace bounds (used by voxposer) is hardcoded in `handover/benchmark_runner.py`
+- The LLM prompt instruction is hardcoded in `_set_waypoints()` in `handover/benchmark_runner.py`
+
+## Code Structure
+The `examples` directory contains the actual run scripts for the thesis and benchmark policy implementations.
+
+### Core to Handover-Sim
+- `handover/handover_env.py`: Defines the handover environment 
+- `handover/benchmark_wrapper.py`: Extends the handover environment to include status checking, goal visualization, and benchmarking capabilities for handover tasks. It also includes configurations for different benchmark setups and splits for training, validation, and testing.
+- `handover/benchmark_runner.py`: Sets up and runs the simulations for handover tasks, using a configured environment, the policy defined in the run script, and various utility functions for rendering and saving results. It integrates with the VoxPoser system to determine the waypoints to execute. *Note: You can set the `index` to only run specific scenes.*
+- `handover/benchmark_evaluator.py`: Functionality for evaluating results of handover simulations, including loading configurations, running the evaluation, logging results, and summarizing performance metrics such as success rates and failure modes. *Note: It used to only run if the results contained all the scenes but has been modified to report the results even if some scenes are missing.*
+
+### Core to VoxPoser 
+The following is copied over from the [VoxPoser github readme](https://github.com/huangwl18/VoxPoser?tab=readme-ov-file#code-structure) with some modifications.
+- `voxposer/LMP.py`: Implementation of Language Model Programs (LMPs) that recursively generates code to decompose instructions and compose value maps for each sub-task.
+- `voxposer/interfaces.py`: Interface that provides necessary APIs for language models (i.e., LMPs) to operate in voxel space and to invoke motion planner.
+- `voxposer/planners.py`: Implementation of a greedy planner that plans a trajectory (represented as a series of waypoints) for an entity/movable given a value map.
+- `voxposer/controllers.py`: [NOT CURRENTLY IN USE] Given a waypoint for an entity/movable, the controller applies (a series of) robot actions to achieve the waypoint.
+- `voxposer/dynamics_models.py`: [NOT CURRENTLY IN USE] Environment dynamics model for the case where entity/movable is an object or object part. This is used in controllers.py to perform MPC.
+- `voxposer/prompts/handover`: Prompts used by the different Language Model Programs (LMPs) in VoxPoser.
+- `voxposer/visualizers.py`: A Plotly-based visualizer for value maps and planned trajectories.
+
+## Evaluation and Benchmarking
+Follow the [Evaluation section](#evaluation) to run the evaluation and the [Benchmarking section](#benchmarking-baselines) to run the benchmarking policies.
+
+An example command to run a benchmark example with visualizations:
+
+```shell
+python examples/run_benchmark_yang_icra2021.py BENCHMARK.SETUP s0 ENV.RENDER_OFFSCREEN True BENCHMARK.SAVE_OFFSCREEN_RENDER True BENCHMARK.SAVE_RESULT True
+```
+
+# Handover-Sim - The rest is copied over from the handover-sim repo
 
 Handover-Sim is a Python-based simulation environment and benchmark for human-to-robot object handovers. The environment and benchmark were initially described in an ICRA 2022 paper:
 
